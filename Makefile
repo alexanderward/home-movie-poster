@@ -1,0 +1,78 @@
+PYTHON := uv run python
+POSTER := uv run poster
+PNPM := npx --yes pnpm@12.11.2 --dir apps/client
+COMPOSE := docker compose --env-file .env -f docker/compose.yaml
+
+.DEFAULT_GOAL := help
+
+.PHONY: help setup start stop restart logs compose compose-check migrate manage web client monitor library-sync client-build client-contracts lint python-types test test-ui test-db
+
+help: ## Show the public command catalogue
+	@$(PYTHON) scripts/commands.py list
+
+setup: ## Install locked Python and client dependencies
+	uv sync --locked
+	$(PNPM) install --frozen-lockfile
+
+start: ## Start the complete development stack
+	$(COMPOSE) up --build --remove-orphans
+
+stop: ## Stop the development stack
+	$(COMPOSE) down
+
+restart: ## Recreate the development stack
+	$(COMPOSE) down
+	$(COMPOSE) up --build --remove-orphans
+
+logs: ## Follow stack logs
+	$(COMPOSE) logs --follow --tail=200
+
+compose: ## Pass ARGS to Docker Compose
+	$(COMPOSE) $(ARGS)
+
+compose-check: ## Validate development and production Compose files
+	docker compose --env-file .env.example -f docker/compose.yaml config --quiet
+	docker compose --env-file .env.example -f docker/compose.yaml -f docker/compose.production.yaml config --quiet
+
+migrate: ## Apply Django database migrations
+	$(POSTER) manage migrate --noinput
+
+manage: ## Run a Django management command with ARGS
+	$(POSTER) manage $(ARGS)
+
+web: ## Run Django locally with reload
+	$(POSTER) web --host 0.0.0.0 --port 8001 --reload
+
+client: ## Run Vite locally
+	$(PNPM) dev --host 0.0.0.0
+
+monitor: ## Run Kaleidescape discovery natively
+	$(POSTER) monitor
+
+library-sync: ## Queue a full Kaleidescape library sync
+	$(POSTER) library-sync
+
+client-build: ## Type-check and build modern and legacy client bundles
+	$(PNPM) build
+
+client-contracts: ## Regenerate TypeScript contracts from Pydantic
+	$(PYTHON) scripts/generate_contracts.py
+
+lint: ## Run Python, client, import, and command lint checks
+	uv run ruff check .
+	uv run lint-imports
+	$(PNPM) lint
+	$(PYTHON) scripts/commands.py check
+
+python-types: ## Run Pyright
+	uv run pyright
+
+test: ## Run fast Python and client tests
+	uv run pytest
+	$(PNPM) test
+
+test-ui: ## Run Playwright browser journeys
+	uv run pytest -m browser
+
+test-db: ## Run PostgreSQL and Redis integration tests
+	uv run pytest -m postgres

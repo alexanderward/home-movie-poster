@@ -1,0 +1,1 @@
+"""Poster management commands."""

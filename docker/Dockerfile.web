@@ -1,0 +1,29 @@
+FROM python:3.12.8-slim-bookworm AS base
+RUN python -m pip install --no-cache-dir --only-binary=:all: uv==0.6.6
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=never \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PATH="/opt/venv/bin:$PATH"
+WORKDIR /workspace
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project \
+    && useradd --create-home --uid 1000 app \
+    && mkdir -p /data/media \
+    && chown -R app:app /opt/venv /data
+COPY --chown=app:app apps ./apps
+COPY --chown=app:app README.md ./
+USER app
+RUN uv sync --frozen --no-dev
+
+FROM base AS web
+CMD ["python", "-m", "apps.cli.main", "web", "--host", "0.0.0.0", "--port", "8000", "--no-reload"]
+
+FROM base AS development
+USER root
+COPY docker/web-entrypoint.sh /usr/local/bin/web-entrypoint
+RUN chmod +x /usr/local/bin/web-entrypoint
+USER app
+ENTRYPOINT ["/usr/local/bin/web-entrypoint"]
+CMD ["python", "-m", "apps.cli.main", "web", "--host", "0.0.0.0", "--port", "8000", "--reload"]

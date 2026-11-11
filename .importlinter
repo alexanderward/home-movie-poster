@@ -1,0 +1,8 @@
+[importlinter]
+root_package = apps
+
+[importlinter:contract:common-independence]
+name = Common code does not import Django server domains
+type = forbidden
+source_modules = apps.common
+forbidden_modules = apps.server
