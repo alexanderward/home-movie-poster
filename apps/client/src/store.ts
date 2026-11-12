@@ -13,8 +13,6 @@ interface DisplayStore {
   connect: () => () => void;
 }
 
-let reconnectTimer: number | undefined;
-
 export const useDisplayStore = create<DisplayStore>((set, get) => ({
   state: null,
   error: '',
@@ -22,44 +20,22 @@ export const useDisplayStore = create<DisplayStore>((set, get) => ({
   refresh: async () => {
     try {
       const state = await api<DisplayState>(isSlideshowPreview() ? '/api/display?preview=slideshow' : '/api/display');
-      set({ state, error: '' });
+      set({ state, error: '', connected: true });
     } catch (error) {
-      set({ error: error instanceof Error ? error.message : 'Display unavailable' });
+      set({ error: error instanceof Error ? error.message : 'Display unavailable', connected: false });
     }
   },
   connect: () => {
-    if (isSlideshowPreview()) {
-      // The websocket pushes the live TV state, so a preview polls its own state instead.
-      void get().refresh();
-      const timer = window.setInterval(() => void get().refresh(), 3000);
-      return () => window.clearInterval(timer);
-    }
-    let socket: WebSocket | null = null;
     let stopped = false;
-    const poll = window.setInterval(() => {
-      if (!get().connected) void get().refresh();
-    }, 5000);
-    const open = () => {
-      if (stopped || !('WebSocket' in window)) return;
-      const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-      socket = new WebSocket(`${protocol}://${window.location.host}/api/display/socket`);
-      socket.onopen = () => set({ connected: true });
-      socket.onmessage = (message) => {
-        try { set({ state: JSON.parse(message.data) as DisplayState, error: '' }); } catch { /* poll recovers */ }
-      };
-      socket.onerror = () => socket?.close();
-      socket.onclose = () => {
-        set({ connected: false });
-        if (!stopped) reconnectTimer = window.setTimeout(open, 5000);
-      };
+    let timer: number | undefined;
+    const poll = async () => {
+      await get().refresh();
+      if (!stopped) timer = window.setTimeout(poll, isSlideshowPreview() ? 3000 : 1000);
     };
-    void get().refresh();
-    open();
+    void poll();
     return () => {
       stopped = true;
-      window.clearInterval(poll);
-      if (reconnectTimer) window.clearTimeout(reconnectTimer);
-      socket?.close();
+      if (timer) window.clearTimeout(timer);
     };
   },
 }));

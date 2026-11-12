@@ -1,3 +1,4 @@
+import { networkInterfaces } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import legacy from '@vitejs/plugin-legacy';
 import react from '@vitejs/plugin-react';
@@ -10,7 +11,15 @@ export default defineConfig(({ command, mode }) => {
     changeOrigin: false,
     ws: true,
   };
+  // The dev server runs on the host, so it can tell the page which LAN addresses a TV or phone can reach.
+  // Built bundles run inside Docker, where the host's addresses are unknown, so they get none.
+  const lanAddresses = command === 'serve'
+    ? Object.entries(networkInterfaces()).flatMap(([name, entries]) => (entries ?? [])
+      .filter((entry) => entry.family === 'IPv4' && !entry.internal && !/^vEthernet|^docker|^br-|^veth/i.test(name))
+      .map((entry) => ({ name, address: entry.address })))
+    : [];
   return {
+    define: { __LAN_ADDRESSES__: JSON.stringify(lanAddresses) },
     plugins: [
       react(),
       legacy({
@@ -25,6 +34,7 @@ export default defineConfig(({ command, mode }) => {
       host: '0.0.0.0',
       port: 5173,
       strictPort: true,
+      allowedHosts: true,
       watch: { usePolling: env.VITE_USE_POLLING === '1' },
       proxy: { '/api': apiProxy, '/media': apiProxy },
     },

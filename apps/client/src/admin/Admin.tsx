@@ -71,8 +71,6 @@ export function Admin() {
           <SettingsTab notify={notify} />
         </>
       ) : <Home notify={notify} />}
-
-      <p className="trust-note"><span>Private by design.</span> Trusted LAN only. This control panel has no login and should never be exposed to the public internet.</p>
     </main>
   );
 }

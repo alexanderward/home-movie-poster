@@ -2,11 +2,11 @@
 
 Home Movie Poster turns a portrait-mounted television into a live cinema display. It discovers a
 Kaleidescape system on the local network, shows active playback and progress, schedules movie
-nights, and rotates through locally cached posters while the player is idle.
+nights, and rotates through a small set of selected posters while the player is idle.
 
-The application is a Django/Django Ninja API with a React/Vite client. PostgreSQL owns durable
-state, Redis carries live display updates, and the dedicated monitor process owns all
-Kaleidescape network activity.
+The application is a Django/Django Ninja API with a React/Vite client. SQLite stores presentation
+settings and selections, TMDB supplies search metadata, and a dedicated read-only monitor follows
+Strato playback. The application never imports or mirrors the Kaleidescape library.
 
 ```bash
 make start

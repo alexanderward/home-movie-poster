@@ -17,28 +17,22 @@ export interface DisplayState {
 
 export interface MovieSummary {
   id: number;
-  source: "kaleidescape" | "tmdb" | "manual";
+  source: "tmdb" | "manual";
   source_key: string;
   title: string;
   year: number | null;
   poster_url: string | null;
   include_in_rotation: boolean;
-  available: boolean;
 }
 
 export interface MovieDetail {
   id: number;
-  source: "kaleidescape" | "tmdb" | "manual";
+  source: "tmdb" | "manual";
   source_key: string;
   title: string;
   year: number | null;
   poster_url: string | null;
   include_in_rotation: boolean;
-  available: boolean;
-  genre: string;
-  rating: string;
-  director: string;
-  synopsis: string;
 }
 
 export interface MoviePage {
@@ -72,27 +66,13 @@ export interface DiscoveredDeviceView {
   device_type: string;
   ip_address: string;
   supports_playback: boolean;
-  supports_library: boolean;
   selected_as_player: boolean;
-  selected_as_library: boolean;
   last_seen_at: string;
 }
 
-export interface DeviceRolesInput {
+export interface PlayerSettingsInput {
   player_serial: string;
-  library_serial: string;
   manual_host: string;
-}
-
-export interface LibrarySyncStatus {
-  id: number;
-  status: "queued" | "running" | "succeeded" | "failed";
-  requested_at: string;
-  started_at: string | null;
-  finished_at: string | null;
-  discovered_count: number;
-  updated_count: number;
-  error: string;
 }
 
 export interface ApplicationSettingsInput {
@@ -106,7 +86,6 @@ export interface ApplicationSettingsView {
   slideshow_interval_seconds: number;
   timezone: string;
   player_serial: string;
-  library_serial: string;
   manual_host: string;
   tmdb_enabled: boolean;
 }
@@ -114,24 +93,14 @@ export interface ApplicationSettingsView {
 export interface SessionView {
   csrf_token: string;
   tmdb_enabled: boolean;
-  websocket_path: string;
 }
 
 export interface HealthView {
   status: "ok" | "degraded";
   database: boolean;
-  redis: boolean;
   monitor: boolean;
   player_connected: boolean;
-  last_library_sync: string | null;
-}
-
-export interface TmdbMovie {
-  id: number;
-  title: string;
-  year: number | null;
-  overview: string;
-  poster_url: string | null;
+  tmdb_configured: boolean;
 }
 
 export interface PosterSearchResult {
@@ -139,7 +108,7 @@ export interface PosterSearchResult {
   title: string;
   year: number | null;
   poster_url: string | null;
-  sources: Array<"kaleidescape" | "tmdb" | "manual">;
+  sources: Array<"tmdb" | "manual">;
   movie_id: number | null;
   tmdb_id: number | null;
   include_in_rotation: boolean;

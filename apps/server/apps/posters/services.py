@@ -9,8 +9,6 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
-from asgiref.sync import async_to_sync
-from channels.layers import get_channel_layer
 from django.conf import settings as django_settings
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
@@ -23,8 +21,8 @@ from apps.common.posters import normalize_image
 
 from .contracts import (
     ApplicationSettingsInput,
-    DeviceRolesInput,
     MovieNightInput,
+    PlayerSettingsInput,
     PosterSearch,
     PosterSearchResult,
     TmdbSearchStatus,
@@ -32,7 +30,6 @@ from .contracts import (
 from .models import (
     ApplicationSettings,
     DiscoveredDevice,
-    LibrarySync,
     Movie,
     MovieNight,
     PosterAsset,
@@ -102,7 +99,6 @@ def update_movie(
         event("movie.artwork.updated", movie_id=movie.id)
     if fields:
         movie.save(update_fields=[*fields, "updated_at"])
-        broadcast_display_state()
     return movie
 
 
@@ -129,7 +125,6 @@ def save_movie_night(payload: MovieNightInput, *, identifier: int | None = None)
     event(
         "schedule.movie_night.saved", movie_night_id=row.id, event_date=row.event_date.isoformat()
     )
-    broadcast_display_state()
     return row
 
 
@@ -137,7 +132,6 @@ def delete_movie_night(identifier: int) -> None:
     row = MovieNight.objects.get(pk=identifier)
     row.delete()
     event("schedule.movie_night.deleted", movie_night_id=identifier)
-    broadcast_display_state()
 
 
 def complete_movie_night_after_playback(title: str) -> MovieNight | None:
@@ -177,53 +171,20 @@ def save_settings(payload: ApplicationSettingsInput) -> ApplicationSettings:
     event(
         "settings.display.updated", rotation=row.rotation, interval=row.slideshow_interval_seconds
     )
-    broadcast_display_state()
     return row
 
 
-def save_roles(payload: DeviceRolesInput) -> ApplicationSettings:
-    for serial, capability in (
-        (payload.player_serial, "supports_playback"),
-        (payload.library_serial, "supports_library"),
-    ):
-        if (
-            serial
-            and not DiscoveredDevice.objects.filter(
-                serial_number=serial, **{capability: True}
-            ).exists()
-        ):
-            raise ValidationError(
-                f"Selected device does not have the required {capability} capability."
-            )
+def save_player_settings(payload: PlayerSettingsInput) -> ApplicationSettings:
+    if payload.player_serial and not DiscoveredDevice.objects.filter(
+        serial_number=payload.player_serial, supports_playback=True
+    ).exists():
+        raise ValidationError("Selected device does not support playback monitoring.")
     row = ApplicationSettings.load()
     row.player_serial = payload.player_serial
-    row.library_serial = payload.library_serial
     row.manual_host = payload.manual_host.strip()
     row.save()
-    event(
-        "settings.devices.updated",
-        player_serial=row.player_serial,
-        library_serial=row.library_serial,
-    )
+    event("settings.player.updated", player_serial=row.player_serial)
     return row
-
-
-def request_library_sync() -> LibrarySync:
-    existing = LibrarySync.objects.filter(
-        status__in=[LibrarySync.Status.QUEUED, LibrarySync.Status.RUNNING]
-    ).first()
-    if existing:
-        return existing
-    row = LibrarySync.objects.create()
-    event("library.sync.queued", sync_id=row.id)
-    return row
-
-
-def broadcast_display_state() -> None:
-    channel_layer = get_channel_layer()
-    if channel_layer is None:
-        return
-    async_to_sync(channel_layer.group_send)("display", {"type": "display.refresh"})
 
 
 def tmdb_search(query: str) -> list[dict[str, object]]:
@@ -290,10 +251,7 @@ def import_tmdb_movie(tmdb_id: int) -> Movie:
             "title": item.get("title") or item.get("original_title") or "Untitled",
             "normalized_title": normalize_title(item.get("title") or ""),
             "year": int(release_date[:4]) if release_date[:4].isdigit() else None,
-            "genre": ", ".join(genre["name"] for genre in item.get("genres", [])),
-            "synopsis": item.get("overview") or "",
             "poster": poster,
-            "available": True,
         },
     )
     event("movie.tmdb.imported", movie_id=movie.id)
@@ -302,12 +260,12 @@ def import_tmdb_movie(tmdb_id: int) -> Movie:
 
 TMDB_SEARCH_CACHE_SECONDS = 600
 LOCAL_SEARCH_LIMIT = 24
-# When one film exists in several places, the card represents the highest-priority copy.
-SOURCE_PRIORITY = {Movie.Source.KALEIDESCAPE: 0, Movie.Source.MANUAL: 1, Movie.Source.TMDB: 2}
+# A manual presentation override wins when it matches a TMDB title.
+SOURCE_PRIORITY = {Movie.Source.MANUAL: 0, Movie.Source.TMDB: 1}
 
 
 def tmdb_search_cached(query: str) -> list[dict[str, object]]:
-    """TMDB search with a short Redis cache; the admin search fires on every typing pause."""
+    """TMDB search with a short process-local cache for typing pauses."""
     key = "tmdb:search:" + hashlib.sha256(query.casefold().encode()).hexdigest()
     try:
         cached = cache.get(key)

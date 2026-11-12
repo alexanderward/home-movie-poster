@@ -1,7 +1,9 @@
 from django.conf import settings
 
 
-def test_channel_layer_allows_blocking_redis_reads() -> None:
-    hosts = settings.CHANNEL_LAYERS["default"]["CONFIG"]["hosts"]
+def test_sqlite_is_the_only_persistent_service() -> None:
+    database = settings.DATABASES["default"]
 
-    assert hosts == [{"address": settings.REDIS_URL, "socket_timeout": None}]
+    assert database["ENGINE"] == "django.db.backends.sqlite3"
+    assert database["OPTIONS"]["transaction_mode"] == "IMMEDIATE"
+    assert "CHANNEL_LAYERS" not in dir(settings)

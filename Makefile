@@ -5,7 +5,7 @@ COMPOSE := docker compose --env-file .env -f docker/compose.yaml
 
 .DEFAULT_GOAL := help
 
-.PHONY: help setup start stop restart logs compose compose-check migrate manage web client monitor library-sync client-build client-contracts lint python-types test test-ui test-db
+.PHONY: help setup start stop restart logs compose compose-check migrate manage web client monitor client-build client-contracts lint python-types test test-ui
 
 help: ## Show the public command catalogue
 	@$(PYTHON) scripts/commands.py list
@@ -14,13 +14,13 @@ setup: ## Install locked Python and client dependencies
 	uv sync --locked
 	$(PNPM) install --frozen-lockfile
 
-start: ## Start the complete development stack
+start: ## Build and start the application
 	$(COMPOSE) up --build --remove-orphans
 
 stop: ## Stop the development stack
 	$(COMPOSE) down
 
-restart: ## Recreate the development stack
+restart: ## Rebuild and recreate the application
 	$(COMPOSE) down
 	$(COMPOSE) up --build --remove-orphans
 
@@ -30,9 +30,8 @@ logs: ## Follow stack logs
 compose: ## Pass ARGS to Docker Compose
 	$(COMPOSE) $(ARGS)
 
-compose-check: ## Validate development and production Compose files
+compose-check: ## Validate the Compose file
 	docker compose --env-file .env.example -f docker/compose.yaml config --quiet
-	docker compose --env-file .env.example -f docker/compose.yaml -f docker/compose.production.yaml config --quiet
 
 migrate: ## Apply Django database migrations
 	$(POSTER) manage migrate --noinput
@@ -48,9 +47,6 @@ client: ## Run Vite locally
 
 monitor: ## Run Kaleidescape discovery natively
 	$(POSTER) monitor
-
-library-sync: ## Queue a full Kaleidescape library sync
-	$(POSTER) library-sync
 
 client-build: ## Type-check and build modern and legacy client bundles
 	$(PNPM) build
@@ -73,6 +69,3 @@ test: ## Run fast Python and client tests
 
 test-ui: ## Run Playwright browser journeys
 	uv run pytest -m browser
-
-test-db: ## Run PostgreSQL and Redis integration tests
-	uv run pytest -m postgres

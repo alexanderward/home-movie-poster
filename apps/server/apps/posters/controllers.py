@@ -13,23 +13,21 @@ from apps.server.apps.posters import selectors, services
 from .contracts import (
     ApplicationSettingsInput,
     ApplicationSettingsView,
-    DeviceRolesInput,
     DiscoveredDeviceView,
     DisplayState,
     HealthView,
-    LibrarySyncStatus,
     MovieDetail,
     MovieNightInput,
     MovieNightView,
     MoviePage,
     MovieUpdate,
+    PlayerSettingsInput,
     PosterSearch,
     SessionView,
     SlideshowView,
-    TmdbMovie,
 )
 from .health import health
-from .models import ApplicationSettings, DiscoveredDevice, LibrarySync, Movie, MovieNight
+from .models import ApplicationSettings, DiscoveredDevice, Movie, MovieNight
 
 router = Router(tags=["home-movie-poster"])
 
@@ -159,32 +157,17 @@ def devices(request: HttpRequest):
             device_type=row.device_type,
             ip_address=row.ip_address,
             supports_playback=row.supports_playback,
-            supports_library=row.supports_library,
             selected_as_player=row.serial_number == config.player_serial,
-            selected_as_library=row.serial_number == config.library_serial,
             last_seen_at=row.last_seen_at,
         )
         for row in DiscoveredDevice.objects.all()
     ]
 
 
-@router.put("/devices/roles", response=ApplicationSettingsView)
-def device_roles(request: HttpRequest, payload: DeviceRolesInput):
+@router.put("/devices/player", response=ApplicationSettingsView)
+def player_settings(request: HttpRequest, payload: PlayerSettingsInput):
     require_csrf(request)
-    return settings_view(services.save_roles(payload))
-
-
-@router.get("/library-sync", response=LibrarySyncStatus | None)
-def library_sync_status(request: HttpRequest):
-    del request
-    row = LibrarySync.objects.first()
-    return LibrarySyncStatus.model_validate(row) if row else None
-
-
-@router.post("/library-sync", response={202: LibrarySyncStatus})
-def library_sync(request: HttpRequest):
-    require_csrf(request)
-    return Status(202, LibrarySyncStatus.model_validate(services.request_library_sync()))
+    return settings_view(services.save_player_settings(payload))
 
 
 def settings_view(row: ApplicationSettings) -> ApplicationSettingsView:
@@ -193,7 +176,6 @@ def settings_view(row: ApplicationSettings) -> ApplicationSettingsView:
         slideshow_interval_seconds=row.slideshow_interval_seconds,
         timezone=row.timezone,
         player_serial=row.player_serial,
-        library_serial=row.library_serial,
         manual_host=row.manual_host,
         tmdb_enabled=bool(os.environ.get("TMDB_READ_TOKEN")),
     )
@@ -211,15 +193,9 @@ def update_settings(request: HttpRequest, payload: ApplicationSettingsInput):
     return settings_view(services.save_settings(payload))
 
 
-@router.get("/tmdb/search", response=list[TmdbMovie])
-def search_tmdb(request: HttpRequest, query: str):
-    del request
-    return [TmdbMovie.model_validate(item) for item in services.tmdb_search(query)]
-
-
 @router.get("/posters/search", response=PosterSearch)
 def search_posters(request: HttpRequest, query: str = ""):
-    """Search Kaleidescape, added posters, and TMDB at once, with duplicates merged."""
+    """Search TMDB and the small set of saved presentation records."""
     del request
     return services.search_posters(query)
 

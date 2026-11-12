@@ -4,15 +4,14 @@ import type { MovieDetail, MovieNightView, MovieSummary, PosterSearch, PosterSea
 import { PosterThumb, dateLabel, errorMessage, isoDate, nextFriday, type Notify, useDebounced } from './shared';
 
 const SOURCE_LABELS: Record<PosterSearchResult['sources'][number], string> = {
-  kaleidescape: 'Kaleidescape',
   tmdb: 'TMDB',
   manual: 'Uploaded',
 };
 
 const TMDB_NOTES: Record<PosterSearch['tmdb'], string> = {
   ok: '',
-  disabled: 'TMDB is not configured, so only Kaleidescape and uploaded posters are searched. Add TMDB_READ_TOKEN to .env to search TMDB too.',
-  unavailable: 'TMDB is unreachable right now. Showing Kaleidescape and uploaded posters only.',
+  disabled: 'TMDB search is not configured. Add TMDB_READ_TOKEN to .env; uploaded and previously selected posters remain available.',
+  unavailable: 'TMDB is unreachable right now. Showing uploaded and previously selected posters only.',
 };
 
 function intervalLabel(seconds: number) {
@@ -27,6 +26,27 @@ function nextFreeFriday(taken: Set<string>) {
   const date = new Date(`${nextFriday()}T12:00:00`);
   while (taken.has(isoDate(date))) date.setDate(date.getDate() + 7);
   return isoDate(date);
+}
+
+/** "Tonight", "Tomorrow" or "In N days" for the next two weeks; empty beyond that. */
+function relativeDay(value: string) {
+  const today = new Date(`${isoDate(new Date())}T12:00:00`);
+  const days = Math.round((new Date(`${value}T12:00:00`).getTime() - today.getTime()) / 86_400_000);
+  if (days <= 0) return 'Tonight';
+  if (days === 1) return 'Tomorrow';
+  return days < 14 ? `In ${days} days` : '';
+}
+
+function longDateLabel(value: string, showtime: string | null) {
+  const label = new Date(`${value}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+  if (!showtime) return label;
+  return `${label} · ${new Date(`2000-01-01T${showtime}`).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
+}
+
+/** Adapts a scheduled night to the search-result shape the schedule sheet edits. */
+function nightResult(night: MovieNightView): PosterSearchResult {
+  const { movie } = night;
+  return { key: `night-${night.id}`, title: movie.title, year: movie.year, poster_url: movie.poster_url, sources: [movie.source], movie_id: movie.id, tmdb_id: null, include_in_rotation: movie.include_in_rotation };
 }
 
 /** Single admin view: what is scheduled, and one search to schedule or add posters. */
@@ -84,10 +104,10 @@ export function Home({ notify }: { notify: Notify }) {
     setPending((keys) => { const next = new Set(keys); if (busy) next.add(key); else next.delete(key); return next; });
   }
 
-  /** Returns the local movie id for a result, importing it from TMDB first when needed. */
+  /** Returns the saved presentation id, snapshotting a TMDB result first when needed. */
   async function ensureMovie(result: PosterSearchResult, includeInRotation: boolean) {
     if (result.movie_id != null) return result.movie_id;
-    if (result.tmdb_id == null) throw new Error('This movie cannot be imported.');
+    if (result.tmdb_id == null) throw new Error('This movie cannot be saved.');
     const movie = await api<MovieDetail>('/api/tmdb/import', { method: 'POST', body: jsonBody({ tmdb_id: result.tmdb_id }) });
     if (movie.include_in_rotation !== includeInRotation) {
       await api(`/api/movies/${movie.id}`, { method: 'PATCH', body: jsonBody({ include_in_rotation: includeInRotation }) });
@@ -142,7 +162,7 @@ export function Home({ notify }: { notify: Notify }) {
       await api(`/api/movie-nights/${night.id}`, { method: 'PATCH', body: jsonBody({ movie_id: night.movie.id, event_date: eventDate, showtime }) });
       notify(`${result.title} moved to ${dateLabel(eventDate, showtime)}.`);
     } else {
-      // Scheduling a TMDB film imports it, but only the + button should put it in the slideshow.
+      // Scheduling snapshots the TMDB presentation, but only + adds it to the slideshow.
       const movieId = await ensureMovie(result, false);
       await api('/api/movie-nights', { method: 'POST', body: jsonBody({ movie_id: movieId, event_date: eventDate, showtime }) });
       notify(`${result.title} scheduled for ${dateLabel(eventDate, showtime)}.`);
@@ -176,18 +196,48 @@ export function Home({ notify }: { notify: Notify }) {
           <p className="empty-state compact">Nothing scheduled, so the TV shows your slideshow. Search for a movie below to plan a movie night.</p>
         )}
         {upcoming.length > 0 && (
-          <div className="card row-list flush-card">
-            {upcoming.map((night) => (
-              <article className="row" key={night.id}>
-                <PosterThumb url={night.movie.poster_url} />
-                <div className="grow"><strong>{night.movie.title}</strong><small>{dateLabel(night.event_date, night.showtime)}</small></div>
-                <button
-                  className={`button quiet small ${confirmingId === night.id ? 'danger' : ''}`}
-                  aria-label={confirmingId === night.id ? `Confirm removing ${night.movie.title}` : `Remove ${night.movie.title}`}
-                  onClick={() => void removeNight(night)}
-                >{confirmingId === night.id ? 'Confirm' : 'Remove'}</button>
-              </article>
-            ))}
+          <div className="up-next">
+            {upcoming.map((night, index) => {
+              const confirming = confirmingId === night.id;
+              const actions = (
+                <div className="night-actions">
+                  <button type="button" className="schedule-button" onClick={() => setScheduling({ result: nightResult(night), night })}>
+                    <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="3.5" width="11" height="10" rx="1.5" /><path d="M2.5 6.5h11M5.5 2v3M10.5 2v3" /></svg>
+                    Reschedule
+                  </button>
+                  <button
+                    type="button"
+                    className={`button quiet small ${confirming ? 'danger' : ''}`}
+                    aria-label={confirming ? `Confirm removing ${night.movie.title}` : `Remove ${night.movie.title}`}
+                    onClick={() => void removeNight(night)}
+                  >{confirming ? 'Confirm' : 'Remove'}</button>
+                </div>
+              );
+              if (index === 0) {
+                const relative = relativeDay(night.event_date);
+                return (
+                  <article className="next-night" key={night.id}>
+                    {night.movie.poster_url && <img className="next-night-backdrop" src={night.movie.poster_url} alt="" aria-hidden="true" />}
+                    <div className="next-night-poster">
+                      {night.movie.poster_url ? <img src={night.movie.poster_url} alt="" /> : <span>{night.movie.title}</span>}
+                    </div>
+                    <div className="next-night-body">
+                      <p className="eyebrow">Next movie night{relative && <> · <span className="next-night-relative">{relative}</span></>}</p>
+                      <h2>{night.movie.title}</h2>
+                      <p className="next-night-date">{longDateLabel(night.event_date, night.showtime)}{night.movie.year && <small> · {night.movie.year}</small>}</p>
+                      {actions}
+                    </div>
+                  </article>
+                );
+              }
+              return (
+                <article className="later-night" key={night.id}>
+                  <PosterThumb url={night.movie.poster_url} />
+                  <div className="grow"><strong>{night.movie.title}</strong><small>{dateLabel(night.event_date, night.showtime)}</small></div>
+                  {actions}
+                </article>
+              );
+            })}
           </div>
         )}
       </section>
@@ -207,7 +257,7 @@ export function Home({ notify }: { notify: Notify }) {
           <>
             <p className="hint">
               Shown on the TV when nothing is playing and no movie night is scheduled. {slideshow.total} poster{slideshow.total === 1 ? '' : 's'}, a new one every {intervalLabel(slideshow.interval_seconds)}.
-              {upcoming.length > 0 && <> <strong className="hint-strong">On hold until after {upcoming[0].movie.title} ({dateLabel(upcoming[0].event_date, null)}).</strong></>}
+              {upcoming.length > 0 && <> <strong className="hint-strong">On hold until after movie night.</strong></>}
             </p>
             <div className={`slideshow-strip ${showAll ? 'expanded' : ''}`} aria-label="Posters in the slideshow">
               <button type="button" className="strip-item strip-tile" onClick={focusSearch}><span aria-hidden="true">+</span>Add</button>
@@ -237,8 +287,8 @@ export function Home({ notify }: { notify: Notify }) {
           <input
             ref={searchInput}
             type="search"
-            aria-label="Search Kaleidescape and TMDB"
-            placeholder="Search Kaleidescape and TMDB"
+            aria-label="Search TMDB"
+            placeholder="Search TMDB"
             autoComplete="off"
             autoCorrect="off"
             spellCheck={false}

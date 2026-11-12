@@ -55,16 +55,6 @@ def run_monitor(_: argparse.Namespace) -> int:
     return 0
 
 
-def run_library_sync(_: argparse.Namespace) -> int:
-    django_setup()
-    configure(service="cli")
-    from apps.server.apps.posters.services import request_library_sync
-
-    row = request_library_sync()
-    print(f"Library sync {row.id} queued.")
-    return 0
-
-
 def run_manage(args: argparse.Namespace) -> int:
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "apps.server.config.settings")
     from django.core.management import execute_from_command_line
@@ -90,9 +80,6 @@ def parser() -> argparse.ArgumentParser:
 
     monitor = commands.add_parser("monitor", help="Discover and monitor Kaleidescape devices")
     monitor.set_defaults(handler=run_monitor)
-
-    sync = commands.add_parser("library-sync", help="Queue a library synchronization")
-    sync.set_defaults(handler=run_library_sync)
 
     manage = commands.add_parser("manage", help="Run a Django management command")
     manage.add_argument("django_args", nargs=argparse.REMAINDER)

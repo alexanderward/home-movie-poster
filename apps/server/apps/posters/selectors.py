@@ -26,18 +26,11 @@ def movie_summary(movie: Movie) -> MovieSummary:
         year=movie.year,
         poster_url=poster_url(movie),
         include_in_rotation=movie.include_in_rotation,
-        available=movie.available,
     )
 
 
 def movie_detail(movie: Movie) -> MovieDetail:
-    return MovieDetail(
-        **movie_summary(movie).model_dump(),
-        genre=movie.genre,
-        rating=movie.rating,
-        director=movie.director,
-        synopsis=movie.synopsis,
-    )
+    return MovieDetail(**movie_summary(movie).model_dump())
 
 
 def movies(
@@ -50,7 +43,7 @@ def movies(
 ):
     queryset = Movie.objects.select_related("poster").order_by("title", "year", "id")
     if query:
-        queryset = queryset.filter(Q(title__icontains=query) | Q(director__icontains=query))
+        queryset = queryset.filter(Q(title__icontains=query) | Q(normalized_title__contains=query))
     if source:
         queryset = queryset.filter(source=source)
     if include_in_rotation is not None:
@@ -73,7 +66,7 @@ def movie_night(row: MovieNight) -> MovieNightView:
 def slideshow_movies():
     """Movies the idle slideshow rotates through."""
     return Movie.objects.select_related("poster").filter(
-        available=True, include_in_rotation=True, poster__isnull=False
+        include_in_rotation=True, poster__isnull=False
     )
 
 
@@ -97,7 +90,7 @@ def display_state(*, slideshow_only: bool = False) -> DisplayState:
     snapshot = (
         None
         if slideshow_only
-        else PlaybackSnapshot.objects.select_related("poster").filter(pk=1).first()
+        else PlaybackSnapshot.objects.filter(pk=1).first()
     )
     if snapshot and snapshot.play_status in ACTIVE_PLAYBACK:
         fresh = snapshot.connected or snapshot.observed_at >= now - timedelta(seconds=30)
@@ -106,7 +99,7 @@ def display_state(*, slideshow_only: bool = False) -> DisplayState:
                 mode="now_playing",
                 headline="Now Playing",
                 title=snapshot.title,
-                poster_url=f"/media/{snapshot.poster.path}" if snapshot.poster_id else None,
+                poster_url=f"/media/{snapshot.poster_path}" if snapshot.poster_path else None,
                 playback_status=snapshot.play_status,
                 position_seconds=snapshot.position_seconds,
                 duration_seconds=snapshot.duration_seconds,
@@ -150,7 +143,7 @@ def display_state(*, slideshow_only: bool = False) -> DisplayState:
         selected = eligible[index]
         return DisplayState(
             mode="rotation",
-            headline="From the Collection",
+            headline="From Your Slideshow",
             title=selected.title,
             poster_url=poster_url(selected),
             rotation=config.rotation,
@@ -160,7 +153,7 @@ def display_state(*, slideshow_only: bool = False) -> DisplayState:
     return DisplayState(
         mode="setup",
         headline="Home Movie Poster",
-        title="Open the admin page to discover Kaleidescape or add a poster.",
+        title="Open the admin page to connect Strato or choose a poster.",
         poster_url=None,
         rotation=config.rotation,
         slideshow_interval_seconds=config.slideshow_interval_seconds,

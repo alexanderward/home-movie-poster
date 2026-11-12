@@ -6,7 +6,7 @@ def test_title_normalization_ignores_punctuation_case_and_suffix():
     assert normalize_title("Wall-E") == "walle"
 
 
-def local(movie_id, title, year, source="kaleidescape", source_key=None, rotation=True):
+def local(movie_id, title, year, source="manual", source_key=None, rotation=True):
     from apps.server.apps.posters.models import Movie
 
     return Movie(
@@ -24,14 +24,14 @@ def tmdb(tmdb_id, title, year):
     return {"id": tmdb_id, "title": title, "year": year, "poster_url": f"https://t/{tmdb_id}.jpg"}
 
 
-def test_merge_prefers_kaleidescape_copy_of_a_tmdb_hit():
+def test_merge_prefers_manual_presentation_for_a_tmdb_hit():
     results = merge_poster_results(
         [local(1, "The Terminator", 1984)], [tmdb(218, "The Terminator", 1984)]
     )
     assert len(results) == 1
     assert results[0].movie_id == 1
     assert results[0].tmdb_id == 218
-    assert results[0].sources == ["kaleidescape", "tmdb"]
+    assert results[0].sources == ["manual", "tmdb"]
 
 
 def test_merge_matches_previously_imported_tmdb_movie_by_id():
@@ -40,14 +40,14 @@ def test_merge_matches_previously_imported_tmdb_movie_by_id():
     assert [(row.movie_id, row.sources) for row in results] == [(2, ["tmdb"])]
 
 
-def test_merge_collapses_kaleidescape_and_imported_copies():
+def test_merge_collapses_manual_and_imported_copies():
     results = merge_poster_results(
         [local(3, "Heat", 1995, source="tmdb", source_key="949"), local(4, "Heat", 1995)],
         [tmdb(949, "Heat", 1995)],
     )
     assert len(results) == 1
     assert results[0].movie_id == 4
-    assert results[0].sources == ["kaleidescape", "tmdb"]
+    assert results[0].sources == ["manual", "tmdb"]
 
 
 def test_merge_keeps_remakes_with_different_years_apart():

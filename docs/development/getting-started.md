@@ -12,17 +12,17 @@ No development container is used.
 ## Setup
 
 1. Copy `.env.example` to the ignored `.env` file.
-2. Change `DJANGO_SECRET_KEY` and the database password before deploying.
+2. Change `DJANGO_SECRET_KEY` and add a `TMDB_READ_TOKEN` before deploying.
 3. Run `make setup`.
 4. Run `make start` for the complete Docker stack.
 5. Open `http://localhost:8000/admin` on a phone-sized browser and `http://localhost:8000/display` for the television.
 
-For native Windows discovery, start the Docker stack without its monitor (`docker compose -f docker/compose.yaml up --scale monitor=0`) and run `make monitor` in a second terminal.
+On Windows, set `KALEIDESCAPE_MANUAL_HOST` when Docker Desktop cannot receive multicast discovery. For fully native development, run `make web`, `make client`, and `make monitor` together so they share the local SQLite and media paths from `.env`.
 
 ## Development split
 
-Use `make web` for Django on port 8001 and `make client` for Vite on 5173. Vite proxies API and media paths to Django. PostgreSQL and Redis may still run through Compose.
+Use `make web` for Django on port 8001 and `make client` for Vite on 5173. Vite proxies API and media paths to Django. Both native processes use the local SQLite and media paths from `.env`.
 
 ## Verification
 
-Run `make lint`, `make python-types`, `make client-build`, and `make test`. PostgreSQL integration and Playwright journeys are separate commands because they require services or a browser install.
+Run `make lint`, `make python-types`, `make client-build`, and `make test`. Playwright journeys remain separate because they require a browser install.

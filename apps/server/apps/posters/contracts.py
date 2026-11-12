@@ -7,7 +7,7 @@ from pydantic import Field
 
 from apps.common.contracts import ContractModel, RequiredName
 
-MovieSource = Literal["kaleidescape", "tmdb", "manual"]
+MovieSource = Literal["tmdb", "manual"]
 DisplayMode = Literal["now_playing", "scheduled", "rotation", "setup"]
 
 
@@ -19,14 +19,10 @@ class MovieSummary(ContractModel):
     year: int | None
     poster_url: str | None
     include_in_rotation: bool
-    available: bool
 
 
 class MovieDetail(MovieSummary):
-    genre: str
-    rating: str
-    director: str
-    synopsis: str
+    pass
 
 
 class MoviePage(ContractModel):
@@ -60,27 +56,13 @@ class DiscoveredDeviceView(ContractModel):
     device_type: str
     ip_address: str
     supports_playback: bool
-    supports_library: bool
     selected_as_player: bool
-    selected_as_library: bool
     last_seen_at: datetime
 
 
-class DeviceRolesInput(ContractModel):
+class PlayerSettingsInput(ContractModel):
     player_serial: str = ""
-    library_serial: str = ""
     manual_host: str = ""
-
-
-class LibrarySyncStatus(ContractModel):
-    id: int
-    status: Literal["queued", "running", "succeeded", "failed"]
-    requested_at: datetime
-    started_at: datetime | None
-    finished_at: datetime | None
-    discovered_count: int
-    updated_count: int
-    error: str
 
 
 class ApplicationSettingsInput(ContractModel):
@@ -91,7 +73,6 @@ class ApplicationSettingsInput(ContractModel):
 
 class ApplicationSettingsView(ApplicationSettingsInput):
     player_serial: str
-    library_serial: str
     manual_host: str
     tmdb_enabled: bool
 
@@ -114,31 +95,21 @@ class DisplayState(ContractModel):
 class SessionView(ContractModel):
     csrf_token: str
     tmdb_enabled: bool
-    websocket_path: str = "/api/display/socket"
 
 
 class HealthView(ContractModel):
     status: Literal["ok", "degraded"]
     database: bool
-    redis: bool
     monitor: bool
     player_connected: bool
-    last_library_sync: datetime | None
-
-
-class TmdbMovie(ContractModel):
-    id: int
-    title: str
-    year: int | None
-    overview: str
-    poster_url: str | None
+    tmdb_configured: bool
 
 
 TmdbSearchStatus = Literal["ok", "disabled", "unavailable"]
 
 
 class PosterSearchResult(ContractModel):
-    """One film found locally, on TMDB, or both, after duplicates are merged."""
+    """One film found in TMDB or the small set of saved presentation records."""
 
     key: str
     title: str

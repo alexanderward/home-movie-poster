@@ -106,29 +106,24 @@ def test_phone_admin_is_usable_at_390_by_844(preview_server):
         "/api/session": {
             "csrf_token": "test",
             "tmdb_enabled": False,
-            "websocket_path": "/api/display/socket",
         },
         "/api/settings": {
             "rotation": 0,
             "slideshow_interval_seconds": 60,
             "timezone": "America/Chicago",
             "player_serial": "",
-            "library_serial": "",
             "manual_host": "",
             "tmdb_enabled": False,
         },
         "/api/devices": [],
-        "/api/movies": {"items": [], "page": 1, "page_size": 50, "total": 0},
         "/api/movie-nights": [],
-        "/api/library-sync": None,
         "/api/slideshow": {"total": 0, "interval_seconds": 60, "items": []},
         "/api/health": {
             "status": "degraded",
             "database": True,
-            "redis": True,
             "monitor": False,
             "player_connected": False,
-            "last_library_sync": None,
+            "tmdb_configured": False,
         },
     }
     with sync_playwright() as playwright:
@@ -144,11 +139,14 @@ def test_phone_admin_is_usable_at_390_by_844(preview_server):
         page.route("**/api/**", handler)
         page.goto(f"{BASE}/admin")
         page.get_by_role("heading", name="Up next").wait_for()
-        assert page.get_by_role("searchbox", name="Search Kaleidescape and TMDB").is_visible()
-        assert page.get_by_text("Trusted LAN only", exact=False).is_visible()
+        assert page.get_by_role("searchbox", name="Search TMDB").is_visible()
+        assert page.get_by_text("Private by design.", exact=False).count() == 0
         assert page.locator("body").evaluate("node => node.scrollWidth <= window.innerWidth")
         page.get_by_role("button", name="Settings").click()
         page.get_by_role("heading", name="Settings").wait_for()
+        assert page.get_by_role("heading", name="Server").is_visible()
+        assert page.get_by_text("127.0.0.1", exact=True).is_visible()
+        assert page.get_by_text(f"{BASE}/admin", exact=True).is_visible()
         assert page.locator("body").evaluate("node => node.scrollWidth <= window.innerWidth")
         page.get_by_role("button", name="Back to movie night").click()
         page.get_by_role("heading", name="Up next").wait_for()

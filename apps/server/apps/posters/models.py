@@ -14,9 +14,7 @@ class DiscoveredDevice(models.Model):
     ip_address = models.GenericIPAddressField(protocol="IPv4")
     movie_zones = models.PositiveSmallIntegerField(default=0)
     supports_playback = models.BooleanField(default=False)
-    supports_library = models.BooleanField(default=False)
     last_seen_at = models.DateTimeField()
-    metadata = models.JSONField(default=dict, blank=True)
 
     class Meta:
         ordering = ["friendly_name", "serial_number"]
@@ -39,7 +37,6 @@ class Movie(models.Model):
         poster_id: int | None
 
     class Source(models.TextChoices):
-        KALEIDESCAPE = "kaleidescape", "Kaleidescape"
         TMDB = "tmdb", "TMDB"
         MANUAL = "manual", "Manual"
 
@@ -48,16 +45,10 @@ class Movie(models.Model):
     title = models.CharField(max_length=300)
     normalized_title = models.CharField(max_length=300, db_index=True)
     year = models.PositiveSmallIntegerField(null=True, blank=True)
-    genre = models.CharField(max_length=300, blank=True)
-    rating = models.CharField(max_length=40, blank=True)
-    director = models.CharField(max_length=300, blank=True)
-    synopsis = models.TextField(blank=True)
     poster = models.ForeignKey(
         PosterAsset, null=True, blank=True, on_delete=models.SET_NULL, related_name="movies"
     )
     include_in_rotation = models.BooleanField(default=True, db_index=True)
-    available = models.BooleanField(default=True, db_index=True)
-    metadata = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -85,9 +76,6 @@ class MovieNight(models.Model):
 
 
 class PlaybackSnapshot(models.Model):
-    if TYPE_CHECKING:
-        poster_id: int | None
-
     SINGLETON_ID = 1
 
     id = models.PositiveSmallIntegerField(primary_key=True, default=SINGLETON_ID, editable=False)
@@ -99,31 +87,16 @@ class PlaybackSnapshot(models.Model):
     year = models.PositiveSmallIntegerField(null=True, blank=True)
     duration_seconds = models.PositiveIntegerField(null=True, blank=True)
     position_seconds = models.PositiveIntegerField(null=True, blank=True)
-    poster = models.ForeignKey(PosterAsset, null=True, blank=True, on_delete=models.SET_NULL)
+    poster_path = models.CharField(max_length=500, blank=True)
+    poster_source_hash = models.CharField(max_length=64, blank=True)
     observed_at = models.DateTimeField()
-    metadata = models.JSONField(default=dict, blank=True)
 
 
-class LibrarySync(models.Model):
-    if TYPE_CHECKING:
-        id: int
+class MonitorHeartbeat(models.Model):
+    SINGLETON_ID = 1
 
-    class Status(models.TextChoices):
-        QUEUED = "queued", "Queued"
-        RUNNING = "running", "Running"
-        SUCCEEDED = "succeeded", "Succeeded"
-        FAILED = "failed", "Failed"
-
-    status = models.CharField(max_length=20, choices=Status.choices, default=Status.QUEUED)
-    requested_at = models.DateTimeField(auto_now_add=True)
-    started_at = models.DateTimeField(null=True, blank=True)
-    finished_at = models.DateTimeField(null=True, blank=True)
-    discovered_count = models.PositiveIntegerField(default=0)
-    updated_count = models.PositiveIntegerField(default=0)
-    error = models.CharField(max_length=500, blank=True)
-
-    class Meta:
-        ordering = ["-requested_at"]
+    id = models.PositiveSmallIntegerField(primary_key=True, default=SINGLETON_ID, editable=False)
+    observed_at = models.DateTimeField()
 
 
 class ApplicationSettings(models.Model):
@@ -138,7 +111,6 @@ class ApplicationSettings(models.Model):
     )
     timezone = models.CharField(max_length=64, default="America/Chicago")
     player_serial = models.CharField(max_length=64, blank=True)
-    library_serial = models.CharField(max_length=64, blank=True)
     manual_host = models.CharField(max_length=255, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
