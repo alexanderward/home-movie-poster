@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+from collections.abc import Iterable
+from typing import Any
 from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -10,14 +12,23 @@ import httpx
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django.conf import settings as django_settings
+from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.common.observability import event
 from apps.common.posters import normalize_image
 
-from .contracts import ApplicationSettingsInput, DeviceRolesInput, MovieNightInput
+from .contracts import (
+    ApplicationSettingsInput,
+    DeviceRolesInput,
+    MovieNightInput,
+    PosterSearch,
+    PosterSearchResult,
+    TmdbSearchStatus,
+)
 from .models import (
     ApplicationSettings,
     DiscoveredDevice,
@@ -26,6 +37,7 @@ from .models import (
     MovieNight,
     PosterAsset,
 )
+from .selectors import poster_url
 
 
 class ConflictError(ValueError):
@@ -126,6 +138,29 @@ def delete_movie_night(identifier: int) -> None:
     row.delete()
     event("schedule.movie_night.deleted", movie_night_id=identifier)
     broadcast_display_state()
+
+
+def complete_movie_night_after_playback(title: str) -> MovieNight | None:
+    """Archive tonight's movie night once its own title has played and stopped.
+
+    The display then moves on to the next movie night or the slideshow instead of advertising a
+    film the family just watched. Playing a different title leaves the movie night in place.
+    """
+    normalized = normalize_title(title)
+    if not normalized:
+        return None
+    today = timezone.localdate(timezone.now(), ZoneInfo(ApplicationSettings.load().timezone))
+    row = (
+        MovieNight.objects.select_related("movie")
+        .filter(event_date=today, archived=False, movie__normalized_title=normalized)
+        .first()
+    )
+    if row is None:
+        return None
+    row.archived = True
+    row.save(update_fields=["archived", "updated_at"])
+    event("schedule.movie_night.watched", movie_night_id=row.id, event_date=today.isoformat())
+    return row
 
 
 def save_settings(payload: ApplicationSettingsInput) -> ApplicationSettings:
@@ -263,3 +298,129 @@ def import_tmdb_movie(tmdb_id: int) -> Movie:
     )
     event("movie.tmdb.imported", movie_id=movie.id)
     return movie
+
+
+TMDB_SEARCH_CACHE_SECONDS = 600
+LOCAL_SEARCH_LIMIT = 24
+# When one film exists in several places, the card represents the highest-priority copy.
+SOURCE_PRIORITY = {Movie.Source.KALEIDESCAPE: 0, Movie.Source.MANUAL: 1, Movie.Source.TMDB: 2}
+
+
+def tmdb_search_cached(query: str) -> list[dict[str, object]]:
+    """TMDB search with a short Redis cache; the admin search fires on every typing pause."""
+    key = "tmdb:search:" + hashlib.sha256(query.casefold().encode()).hexdigest()
+    try:
+        cached = cache.get(key)
+    except Exception:
+        cached = None
+    if cached is not None:
+        return cached
+    results = tmdb_search(query)
+    try:
+        cache.set(key, results, TMDB_SEARCH_CACHE_SECONDS)
+    except Exception:
+        pass
+    return results
+
+
+def merge_poster_results(
+    local: Iterable[Movie], tmdb: Iterable[dict[str, Any]]
+) -> list[PosterSearchResult]:
+    """Combine local movies and TMDB hits into one card per film.
+
+    Films are the same when they share a TMDB id, or a normalized title and a year (a missing
+    year on either side matches any year). Local copies come first, ordered by title, followed
+    by TMDB-only films in TMDB relevance order.
+    """
+    local_rows: list[dict[str, Any]] = []
+    remote_rows: list[dict[str, Any]] = []
+    by_tmdb: dict[int, dict[str, Any]] = {}
+    by_title: dict[str, list[dict[str, Any]]] = {}
+
+    def find(title: str, year: int | None, tmdb_id: int | None) -> dict[str, Any] | None:
+        if tmdb_id is not None and tmdb_id in by_tmdb:
+            return by_tmdb[tmdb_id]
+        for row in by_title.get(normalize_title(title), []):
+            if year is None or row["year"] is None or row["year"] == year:
+                return row
+        return None
+
+    def remember(row: dict[str, Any]) -> None:
+        by_title.setdefault(normalize_title(row["title"]), []).append(row)
+        if row["tmdb_id"] is not None:
+            by_tmdb[row["tmdb_id"]] = row
+
+    def absorb(row: dict[str, Any], source: str, tmdb_id: int | None) -> None:
+        if source not in row["sources"]:
+            row["sources"].append(source)
+        if tmdb_id is not None and row["tmdb_id"] is None:
+            row["tmdb_id"] = tmdb_id
+            by_tmdb[tmdb_id] = row
+
+    for movie in sorted(local, key=lambda row: SOURCE_PRIORITY.get(row.source, 9)):
+        tmdb_id = (
+            int(movie.source_key)
+            if movie.source == Movie.Source.TMDB and movie.source_key.isdigit()
+            else None
+        )
+        existing = find(movie.title, movie.year, tmdb_id)
+        if existing:
+            absorb(existing, movie.source, tmdb_id)
+            continue
+        row = {
+            "key": f"movie:{movie.id}",
+            "title": movie.title,
+            "year": movie.year,
+            "poster_url": poster_url(movie),
+            "sources": [movie.source],
+            "movie_id": movie.id,
+            "tmdb_id": tmdb_id,
+            "include_in_rotation": movie.include_in_rotation,
+        }
+        local_rows.append(row)
+        remember(row)
+
+    for item in tmdb:
+        tmdb_id = int(item["id"])
+        existing = find(str(item["title"]), item.get("year"), tmdb_id)
+        if existing:
+            absorb(existing, Movie.Source.TMDB, tmdb_id)
+            continue
+        row = {
+            "key": f"tmdb:{tmdb_id}",
+            "title": str(item["title"]),
+            "year": item.get("year"),
+            "poster_url": item.get("poster_url"),
+            "sources": [Movie.Source.TMDB],
+            "movie_id": None,
+            "tmdb_id": tmdb_id,
+            "include_in_rotation": False,
+        }
+        remote_rows.append(row)
+        remember(row)
+
+    local_rows.sort(key=lambda row: (row["title"].casefold(), row["year"] or 0))
+    return [PosterSearchResult(**row) for row in (*local_rows, *remote_rows)]
+
+
+def search_posters(query: str) -> PosterSearch:
+    query = query.strip()[:200]
+    tmdb_status: TmdbSearchStatus = "ok" if os.environ.get("TMDB_READ_TOKEN") else "disabled"
+    if not query:
+        return PosterSearch(query=query, results=[], tmdb=tmdb_status)
+    condition = Q(title__icontains=query)
+    normalized = normalize_title(query)
+    if normalized:
+        condition |= Q(normalized_title__contains=normalized)
+    local = list(
+        Movie.objects.select_related("poster")
+        .filter(condition)
+        .order_by("title", "year", "id")[:LOCAL_SEARCH_LIMIT]
+    )
+    remote: list[dict[str, object]] = []
+    if tmdb_status == "ok":
+        try:
+            remote = tmdb_search_cached(query)
+        except DependencyUnavailableError:
+            tmdb_status = "unavailable"
+    return PosterSearch(query=query, results=merge_poster_results(local, remote), tmdb=tmdb_status)

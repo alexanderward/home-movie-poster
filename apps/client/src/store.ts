@@ -2,6 +2,9 @@ import { create } from 'zustand';
 import { api } from './api';
 import type { DisplayState } from './contracts.generated';
 
+/** `/display?preview=slideshow` shows the idle slideshow even while a movie night or playback would win. */
+export const isSlideshowPreview = () => new URLSearchParams(window.location.search).get('preview') === 'slideshow';
+
 interface DisplayStore {
   state: DisplayState | null;
   error: string;
@@ -18,13 +21,19 @@ export const useDisplayStore = create<DisplayStore>((set, get) => ({
   connected: false,
   refresh: async () => {
     try {
-      const state = await api<DisplayState>('/api/display');
+      const state = await api<DisplayState>(isSlideshowPreview() ? '/api/display?preview=slideshow' : '/api/display');
       set({ state, error: '' });
     } catch (error) {
       set({ error: error instanceof Error ? error.message : 'Display unavailable' });
     }
   },
   connect: () => {
+    if (isSlideshowPreview()) {
+      // The websocket pushes the live TV state, so a preview polls its own state instead.
+      void get().refresh();
+      const timer = window.setInterval(() => void get().refresh(), 3000);
+      return () => window.clearInterval(timer);
+    }
     let socket: WebSocket | null = null;
     let stopped = false;
     const poll = window.setInterval(() => {

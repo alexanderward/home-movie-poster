@@ -23,7 +23,9 @@ from .contracts import (
     MovieNightView,
     MoviePage,
     MovieUpdate,
+    PosterSearch,
     SessionView,
+    SlideshowView,
     TmdbMovie,
 )
 from .health import health
@@ -47,9 +49,16 @@ def session(request: HttpRequest):
 
 
 @router.get("/display", response=DisplayState)
-def display(request: HttpRequest):
+def display(request: HttpRequest, preview: str = ""):
+    """Current television state; ``preview=slideshow`` ignores playback and movie nights."""
     del request
-    return selectors.display_state()
+    return selectors.display_state(slideshow_only=preview == "slideshow")
+
+
+@router.get("/slideshow", response=SlideshowView)
+def get_slideshow(request: HttpRequest, limit: int = 24):
+    del request
+    return selectors.slideshow(limit=min(max(limit, 1), 1000))
 
 
 @router.get("/movies", response=MoviePage)
@@ -206,6 +215,13 @@ def update_settings(request: HttpRequest, payload: ApplicationSettingsInput):
 def search_tmdb(request: HttpRequest, query: str):
     del request
     return [TmdbMovie.model_validate(item) for item in services.tmdb_search(query)]
+
+
+@router.get("/posters/search", response=PosterSearch)
+def search_posters(request: HttpRequest, query: str = ""):
+    """Search Kaleidescape, added posters, and TMDB at once, with duplicates merged."""
+    del request
+    return services.search_posters(query)
 
 
 class TmdbImport(Schema):

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useDisplayStore } from '../store';
+import { isSlideshowPreview, useDisplayStore } from '../store';
 import { calculateProgress } from '../progress';
 
 function formatDate(value: string | null, showtime: string | null) {
@@ -57,22 +57,16 @@ export function Display() {
     <main className={`display-shell rotation-${state.rotation}`}>
       <section className={`display-canvas ${rotated ? 'is-rotated' : ''}`}>
         {state.poster_url && <div className="poster-ambient" aria-hidden="true"><img src={state.poster_url} alt="" /></div>}
-        <header className="display-brand display-brand-overlay"><span className="brand-mark">H</span><span>Home Movie Poster</span></header>
+        {isSlideshowPreview() && <p className="preview-badge">Slideshow preview</p>}
         <div className="poster-frame">
-          {state.poster_url ? <img src={state.poster_url} alt={`${state.title} poster`} /> : <div className="poster-empty"><span>HOME CINEMA</span></div>}
+          {state.poster_url ? <img src={state.poster_url} alt={`${state.title} poster`} /> : <div className="poster-empty"><span>{state.title}</span></div>}
         </div>
-        <div className="display-copy">
-          <div className="eyebrow-row">
-            <p className="eyebrow">{state.headline}</p>
-            <span className={`connection-dot ${connected ? 'online' : ''}`} aria-label={connected ? 'Live' : 'Polling'} />
-          </div>
-          <h1>{state.title}</h1>
-          {state.playback_status === 'paused' && <p className="paused">Paused</p>}
+        {state.mode === 'scheduled' && formatDate(state.event_date, state.showtime) && (
           <p className="showtime">{formatDate(state.event_date, state.showtime)}</p>
-          {state.mode === 'now_playing' && state.duration_seconds && (
-            <div className="progress" aria-label={`${Math.round(progress)} percent watched`}><span style={{ width: `${progress}%` }} /></div>
-          )}
-        </div>
+        )}
+        {state.mode === 'now_playing' && state.duration_seconds && (
+          <div className="progress" aria-label={`${Math.round(progress)} percent watched`}><span style={{ width: `${progress}%` }} /></div>
+        )}
       </section>
     </main>
   );

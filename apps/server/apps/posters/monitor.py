@@ -34,7 +34,7 @@ from .models import (
     PlaybackSnapshot,
     PosterAsset,
 )
-from .services import normalize_title, store_poster
+from .services import complete_movie_night_after_playback, normalize_title, store_poster
 
 ACTIVE = {
     const.PLAY_STATUS_PLAYING,
@@ -434,6 +434,9 @@ class PosterMonitor:
                 status=play_status,
                 title=title,
             )
+        if prior and prior.play_status in ACTIVE and play_status not in ACTIVE:
+            # The player may clear the title when it stops, so match on what was playing.
+            complete_movie_night_after_playback(prior.title)
         event("playback.snapshot.updated", status=play_status, title=title)
 
     async def broadcast(self) -> None:

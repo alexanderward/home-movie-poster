@@ -132,3 +132,33 @@ class TmdbMovie(ContractModel):
     year: int | None
     overview: str
     poster_url: str | None
+
+
+TmdbSearchStatus = Literal["ok", "disabled", "unavailable"]
+
+
+class PosterSearchResult(ContractModel):
+    """One film found locally, on TMDB, or both, after duplicates are merged."""
+
+    key: str
+    title: str
+    year: int | None
+    poster_url: str | None
+    sources: list[MovieSource]
+    movie_id: int | None
+    tmdb_id: int | None
+    include_in_rotation: bool
+
+
+class PosterSearch(ContractModel):
+    query: str
+    results: list[PosterSearchResult]
+    tmdb: TmdbSearchStatus
+
+
+class SlideshowView(ContractModel):
+    """Posters the idle slideshow rotates through; ``items`` is the most recently changed few."""
+
+    total: int
+    interval_seconds: int
+    items: list[MovieSummary]

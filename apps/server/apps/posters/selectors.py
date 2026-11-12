@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 from django.db.models import Q
 from django.utils import timezone
 
-from .contracts import DisplayState, MovieDetail, MovieNightView, MovieSummary
+from .contracts import DisplayState, MovieDetail, MovieNightView, MovieSummary, SlideshowView
 from .models import ApplicationSettings, Movie, MovieNight, PlaybackSnapshot
 
 ACTIVE_PLAYBACK = {"playing", "paused", "forward", "reverse"}
@@ -70,11 +70,35 @@ def movie_night(row: MovieNight) -> MovieNightView:
     )
 
 
-def display_state() -> DisplayState:
+def slideshow_movies():
+    """Movies the idle slideshow rotates through."""
+    return Movie.objects.select_related("poster").filter(
+        available=True, include_in_rotation=True, poster__isnull=False
+    )
+
+
+def slideshow(limit: int = 24) -> SlideshowView:
+    rows = slideshow_movies()
+    return SlideshowView(
+        total=rows.count(),
+        interval_seconds=ApplicationSettings.load().slideshow_interval_seconds,
+        items=[movie_summary(row) for row in rows.order_by("-updated_at", "id")[:limit]],
+    )
+
+
+def display_state(*, slideshow_only: bool = False) -> DisplayState:
+    """What the television shows now: playback, then the next movie night, then the slideshow.
+
+    ``slideshow_only`` skips playback and movie nights so the admin can preview the slideshow.
+    """
     config = ApplicationSettings.load()
     now = timezone.now()
     local_date = timezone.localdate(now, ZoneInfo(config.timezone))
-    snapshot = PlaybackSnapshot.objects.select_related("poster").filter(pk=1).first()
+    snapshot = (
+        None
+        if slideshow_only
+        else PlaybackSnapshot.objects.select_related("poster").filter(pk=1).first()
+    )
     if snapshot and snapshot.play_status in ACTIVE_PLAYBACK:
         fresh = snapshot.connected or snapshot.observed_at >= now - timedelta(seconds=30)
         if fresh:
@@ -93,7 +117,9 @@ def display_state() -> DisplayState:
 
     MovieNight.objects.filter(event_date__lt=local_date, archived=False).update(archived=True)
     upcoming = (
-        MovieNight.objects.select_related("movie__poster")
+        None
+        if slideshow_only
+        else MovieNight.objects.select_related("movie__poster")
         .filter(event_date__gte=local_date, archived=False)
         .order_by("event_date")
         .first()
@@ -116,11 +142,7 @@ def display_state() -> DisplayState:
             slideshow_interval_seconds=config.slideshow_interval_seconds,
         )
 
-    eligible = list(
-        Movie.objects.select_related("poster")
-        .filter(available=True, include_in_rotation=True, poster__isnull=False)
-        .order_by("id")
-    )
+    eligible = list(slideshow_movies().order_by("id"))
     if eligible:
         bucket = int(now.timestamp()) // config.slideshow_interval_seconds
         cycle, index = divmod(bucket, len(eligible))

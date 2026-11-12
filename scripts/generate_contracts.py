@@ -26,6 +26,9 @@ MODELS = [
     contracts.SessionView,
     contracts.HealthView,
     contracts.TmdbMovie,
+    contracts.PosterSearchResult,
+    contracts.PosterSearch,
+    contracts.SlideshowView,
 ]
 
 

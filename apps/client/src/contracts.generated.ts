@@ -133,3 +133,26 @@ export interface TmdbMovie {
   overview: string;
   poster_url: string | null;
 }
+
+export interface PosterSearchResult {
+  key: string;
+  title: string;
+  year: number | null;
+  poster_url: string | null;
+  sources: Array<"kaleidescape" | "tmdb" | "manual">;
+  movie_id: number | null;
+  tmdb_id: number | null;
+  include_in_rotation: boolean;
+}
+
+export interface PosterSearch {
+  query: string;
+  results: Array<PosterSearchResult>;
+  tmdb: "ok" | "disabled" | "unavailable";
+}
+
+export interface SlideshowView {
+  total: number;
+  interval_seconds: number;
+  items: Array<MovieSummary>;
+}

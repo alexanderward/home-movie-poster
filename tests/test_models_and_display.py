@@ -70,6 +70,62 @@ def test_stale_disconnected_playback_expires_to_schedule():
     assert state.headline == "Tonight"
 
 
+def write_playback(monitor, status, title):
+    monitor.write_snapshot(
+        connected=True,
+        play_status=status,
+        title=title,
+        year=None,
+        duration=7200,
+        position=60,
+        poster_id=None,
+        observed=timezone.now(),
+    )
+
+
+def tonight():
+    config = ApplicationSettings.load()
+    config.timezone = timezone.get_current_timezone_name()
+    config.save()
+    return timezone.localdate()
+
+
+def test_other_title_stopping_reverts_to_scheduled_movie_night():
+    MovieNight.objects.create(movie=movie("Tonight"), event_date=tonight())
+    monitor = PosterMonitor()
+    write_playback(monitor, "playing", "Something Else")
+    assert display_state().mode == "now_playing"
+
+    write_playback(monitor, "none", "")
+    state = display_state()
+    assert state.mode == "scheduled"
+    assert state.title == "Tonight"
+
+
+def test_watching_tonights_movie_retires_it_to_the_slideshow():
+    MovieNight.objects.create(movie=movie("Tonight"), event_date=tonight())
+    movie("Rotation", "rotation")
+    monitor = PosterMonitor()
+    write_playback(monitor, "playing", "Tonight")
+    assert display_state().title == "Tonight"
+    assert display_state().mode == "now_playing"
+
+    write_playback(monitor, "none", "")
+    assert MovieNight.objects.get().archived
+    state = display_state()
+    assert state.mode == "rotation"
+    assert state.title == "Rotation"
+
+
+def test_watching_a_future_movie_nights_title_keeps_it_scheduled():
+    MovieNight.objects.create(movie=movie("Friday"), event_date=tonight() + timedelta(days=2))
+    monitor = PosterMonitor()
+    write_playback(monitor, "playing", "Friday")
+    write_playback(monitor, "stopped", "Friday")
+    assert not MovieNight.objects.get().archived
+    assert display_state().mode == "scheduled"
+
+
 def test_duplicate_movie_night_date_is_rejected():
     first = movie("First", "first")
     second = movie("Second", "second")
@@ -130,3 +186,17 @@ def test_mutations_require_same_origin_csrf_token():
     token = session.json()["csrf_token"]
     assert client.post("/api/library-sync").status_code == 403
     assert client.post("/api/library-sync", HTTP_X_CSRFTOKEN=token).status_code == 202
+
+
+def test_slideshow_preview_ignores_scheduled_movie_night():
+    scheduled = movie("Scheduled", "scheduled-preview")
+    rotating = movie("Rotating", "rotating-preview")
+    scheduled.include_in_rotation = False
+    scheduled.save()
+    save_movie_night(
+        MovieNightInput(movie_id=scheduled.id, event_date=timezone.localdate() + timedelta(days=3))
+    )
+    assert display_state().mode == "scheduled"
+    preview = display_state(slideshow_only=True)
+    assert preview.mode == "rotation"
+    assert preview.title == rotating.title

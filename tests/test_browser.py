@@ -83,7 +83,7 @@ def test_display_viewports_and_poster_containment(preview_server, viewport, rota
 
         page.route("**/api/display", handler)
         page.goto(f"{BASE}/display")
-        page.get_by_text("Now Playing", exact=True).wait_for()
+        page.locator(".poster-frame img").wait_for()
         assert (
             page.locator(".display-canvas").get_attribute("class").find("is-rotated") >= 0
             if rotation
@@ -93,7 +93,10 @@ def test_display_viewports_and_poster_containment(preview_server, viewport, rota
             page.locator(".poster-frame img").evaluate("node => getComputedStyle(node).objectFit")
             == "contain"
         )
-        assert page.locator("h1").is_visible()
+        # The poster spans the full width of the portrait canvas.
+        canvas = page.locator(".display-canvas").evaluate("node => node.clientWidth")
+        poster = page.locator(".poster-frame img").evaluate("node => node.clientWidth")
+        assert poster == canvas
         browser.close()
 
 
@@ -118,6 +121,15 @@ def test_phone_admin_is_usable_at_390_by_844(preview_server):
         "/api/movies": {"items": [], "page": 1, "page_size": 50, "total": 0},
         "/api/movie-nights": [],
         "/api/library-sync": None,
+        "/api/slideshow": {"total": 0, "interval_seconds": 60, "items": []},
+        "/api/health": {
+            "status": "degraded",
+            "database": True,
+            "redis": True,
+            "monitor": False,
+            "player_connected": False,
+            "last_library_sync": None,
+        },
     }
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
@@ -131,7 +143,13 @@ def test_phone_admin_is_usable_at_390_by_844(preview_server):
 
         page.route("**/api/**", handler)
         page.goto(f"{BASE}/admin")
-        page.get_by_role("heading", name="Movie night", exact=False).wait_for()
+        page.get_by_role("heading", name="Up next").wait_for()
+        assert page.get_by_role("searchbox", name="Search Kaleidescape and TMDB").is_visible()
         assert page.get_by_text("Trusted LAN only", exact=False).is_visible()
         assert page.locator("body").evaluate("node => node.scrollWidth <= window.innerWidth")
+        page.get_by_role("button", name="Settings").click()
+        page.get_by_role("heading", name="Settings").wait_for()
+        assert page.locator("body").evaluate("node => node.scrollWidth <= window.innerWidth")
+        page.get_by_role("button", name="Back to movie night").click()
+        page.get_by_role("heading", name="Up next").wait_for()
         browser.close()
