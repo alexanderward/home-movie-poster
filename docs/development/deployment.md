@@ -14,4 +14,5 @@ Open `http://PI_ADDRESS:8000/admin` on a phone. Open `http://PI_ADDRESS:8000/dis
 
 The monitor requires Linux host networking for SDDP multicast, passive advertisements, and UDP port 1443. Keep the Pi and Kaleidescape on the same broadcast domain. Use the manual hostname only when multicast cannot cross the network layout.
 
-Back up the `poster-data` volume. Do not expose Django through router port forwarding.
+Back up the `poster-data` volume. Its Docker name stays `home-movie-poster_poster-data` after the
+rename to Frame, so existing installs keep their database and media. Do not expose Django through router port forwarding.

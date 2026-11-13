@@ -1,5 +1,5 @@
 PYTHON := uv run python
-POSTER := uv run poster
+FRAME := uv run frame
 PNPM := npx --yes pnpm@12.11.2 --dir apps/client
 COMPOSE := docker compose --env-file .env -f docker/compose.yaml
 
@@ -34,19 +34,19 @@ compose-check: ## Validate the Compose file
 	docker compose --env-file .env.example -f docker/compose.yaml config --quiet
 
 migrate: ## Apply Django database migrations
-	$(POSTER) manage migrate --noinput
+	$(FRAME) manage migrate --noinput
 
 manage: ## Run a Django management command with ARGS
-	$(POSTER) manage $(ARGS)
+	$(FRAME) manage $(ARGS)
 
 web: ## Run Django locally with reload
-	$(POSTER) web --host 0.0.0.0 --port 8001 --reload
+	$(FRAME) web --host 0.0.0.0 --port 8001 --reload
 
 client: ## Run Vite locally
 	$(PNPM) dev --host 0.0.0.0
 
 monitor: ## Run Kaleidescape discovery natively
-	$(POSTER) monitor
+	$(FRAME) monitor
 
 client-build: ## Type-check and build modern and legacy client bundles
 	$(PNPM) build

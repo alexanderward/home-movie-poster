@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import Any
 from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -21,6 +21,7 @@ from apps.common.posters import normalize_image
 
 from .contracts import (
     ApplicationSettingsInput,
+    DisplayOverrideInput,
     MovieNightInput,
     PlayerSettingsInput,
     PosterSearch,
@@ -29,12 +30,14 @@ from .contracts import (
 )
 from .models import (
     ApplicationSettings,
+    Collection,
+    CollectionItem,
     DiscoveredDevice,
     Movie,
     MovieNight,
     PosterAsset,
 )
-from .selectors import poster_url
+from .selectors import collection_ids, poster_url
 
 
 class ConflictError(ValueError):
@@ -68,38 +71,149 @@ def store_poster(contents: bytes, *, source_url: str = "") -> PosterAsset:
     return asset
 
 
-def create_manual_movie(title: str, year: int | None, poster_contents: bytes) -> Movie:
-    asset = store_poster(poster_contents)
-    movie = Movie.objects.create(
-        source=Movie.Source.MANUAL,
-        source_key=uuid4().hex,
-        title=title.strip(),
-        normalized_title=normalize_title(title),
-        year=year,
-        poster=asset,
-    )
-    event("movie.manual.created", movie_id=movie.id)
-    return movie
-
-
-def update_movie(
-    movie: Movie,
-    *,
-    include_in_rotation: bool | None = None,
-    poster_contents: bytes | None = None,
+def create_manual_movie(
+    title: str, year: int | None, poster_contents: bytes, *, collection_id: int | None = None
 ) -> Movie:
-    fields: list[str] = []
-    if include_in_rotation is not None:
-        movie.include_in_rotation = include_in_rotation
-        fields.append("include_in_rotation")
-        event("movie.rotation.updated", movie_id=movie.id, enabled=include_in_rotation)
-    if poster_contents is not None:
-        movie.poster = store_poster(poster_contents)
-        fields.append("poster")
-        event("movie.artwork.updated", movie_id=movie.id)
-    if fields:
-        movie.save(update_fields=[*fields, "updated_at"])
+    collection = Collection.objects.get(pk=collection_id) if collection_id is not None else None
+    asset = store_poster(poster_contents)
+    with transaction.atomic():
+        movie = Movie.objects.create(
+            source=Movie.Source.MANUAL,
+            source_key=uuid4().hex,
+            title=title.strip(),
+            normalized_title=normalize_title(title),
+            year=year,
+            poster=asset,
+        )
+        if collection is not None:
+            CollectionItem.objects.create(collection=collection, movie=movie)
+    event("movie.manual.created", movie_id=movie.id, collection_id=collection_id)
     return movie
+
+
+def replace_movie_poster(movie: Movie, poster_contents: bytes) -> Movie:
+    movie.poster = store_poster(poster_contents)
+    movie.save(update_fields=["poster", "updated_at"])
+    event("movie.artwork.updated", movie_id=movie.id)
+    return movie
+
+
+def _unique_collection_name(name: str, *, exclude: int | None = None) -> str:
+    name = name.strip()
+    taken = Collection.objects.filter(name__iexact=name)
+    if exclude is not None:
+        taken = taken.exclude(pk=exclude)
+    if taken.exists():
+        raise ConflictError(f"A collection named “{name}” already exists.")
+    return name
+
+
+def create_collection(name: str) -> Collection:
+    """Create a collection; the first one also becomes what the TV shows."""
+    try:
+        with transaction.atomic():
+            collection = Collection.objects.create(name=_unique_collection_name(name))
+            config = ApplicationSettings.load()
+            if config.active_collection_id is None:
+                config.active_collection = collection
+                config.save(update_fields=["active_collection", "updated_at"])
+    except IntegrityError as error:
+        raise ConflictError("A collection with that name already exists.") from error
+    event("collection.created", collection_id=collection.id)
+    return collection
+
+
+def update_collection(
+    identifier: int,
+    *,
+    name: str | None = None,
+    tv_headline: str | None = None,
+    show_headline: bool | None = None,
+) -> Collection:
+    """Rename a collection and/or change its TV headline; ``None`` leaves a field unchanged."""
+    collection = Collection.objects.get(pk=identifier)
+    fields = ["updated_at"]
+    if name is not None:
+        collection.name = _unique_collection_name(name, exclude=identifier)
+        fields.append("name")
+    if tv_headline is not None:
+        collection.tv_headline = tv_headline.strip()
+        fields.append("tv_headline")
+    if show_headline is not None:
+        collection.show_headline = show_headline
+        fields.append("show_headline")
+    try:
+        collection.save(update_fields=fields)
+    except IntegrityError as error:
+        raise ConflictError("A collection with that name already exists.") from error
+    event("collection.updated", collection_id=identifier, fields=fields[1:])
+    return collection
+
+
+def rename_collection(identifier: int, name: str) -> Collection:
+    return update_collection(identifier, name=name)
+
+
+def delete_collection(identifier: int) -> None:
+    """Delete a collection and its memberships; its items stay saved for other collections."""
+    Collection.objects.get(pk=identifier).delete()
+    event("collection.deleted", collection_id=identifier)
+
+
+def set_active_collection(identifier: int | None) -> ApplicationSettings:
+    config = ApplicationSettings.load()
+    config.active_collection = (
+        Collection.objects.get(pk=identifier) if identifier is not None else None
+    )
+    config.save(update_fields=["active_collection", "updated_at"])
+    event("collection.activated", collection_id=identifier)
+    return config
+
+
+def set_display_override(payload: DisplayOverrideInput) -> ApplicationSettings:
+    """Force what the TV shows until switched back to automatic."""
+    config = ApplicationSettings.load()
+    collection = movie = None
+    if payload.mode == "slideshow" and payload.collection_id is not None:
+        collection = Collection.objects.get(pk=payload.collection_id)
+    if payload.mode == "poster":
+        if payload.movie_id is None:
+            raise ValueError("Choose a poster to pin to the TV.")
+        movie = Movie.objects.get(pk=payload.movie_id)
+        if not movie.poster_id:
+            raise ValueError(f"{movie.title} has no image to show.")
+    config.display_override = payload.mode
+    config.override_collection = collection
+    config.override_movie = movie
+    config.save(
+        update_fields=["display_override", "override_collection", "override_movie", "updated_at"]
+    )
+    event(
+        "display.override",
+        mode=payload.mode,
+        collection_id=collection.id if collection else None,
+        movie_id=movie.id if movie else None,
+    )
+    return config
+
+
+def add_to_collection(collection_id: int, movie_id: int) -> Movie:
+    collection = Collection.objects.get(pk=collection_id)
+    movie = Movie.objects.get(pk=movie_id)
+    _, created = CollectionItem.objects.get_or_create(collection=collection, movie=movie)
+    if created:
+        Collection.objects.filter(pk=collection_id).update(updated_at=timezone.now())
+        event("collection.item.added", collection_id=collection_id, movie_id=movie_id)
+    return movie
+
+
+def remove_from_collection(collection_id: int, movie_id: int) -> None:
+    deleted, _ = CollectionItem.objects.filter(
+        collection_id=collection_id, movie_id=movie_id
+    ).delete()
+    if deleted:
+        Collection.objects.filter(pk=collection_id).update(updated_at=timezone.now())
+        event("collection.item.removed", collection_id=collection_id, movie_id=movie_id)
 
 
 def save_movie_night(payload: MovieNightInput, *, identifier: int | None = None) -> MovieNight:
@@ -282,14 +396,18 @@ def tmdb_search_cached(query: str) -> list[dict[str, object]]:
 
 
 def merge_poster_results(
-    local: Iterable[Movie], tmdb: Iterable[dict[str, Any]]
+    local: Iterable[Movie],
+    tmdb: Iterable[dict[str, Any]],
+    memberships: Mapping[int, list[int]] | None = None,
 ) -> list[PosterSearchResult]:
     """Combine local movies and TMDB hits into one card per film.
 
     Films are the same when they share a TMDB id, or a normalized title and a year (a missing
     year on either side matches any year). Local copies come first, ordered by title, followed
-    by TMDB-only films in TMDB relevance order.
+    by TMDB-only films in TMDB relevance order. ``memberships`` maps a saved movie id to the
+    ids of the collections it belongs to.
     """
+    memberships = memberships or {}
     local_rows: list[dict[str, Any]] = []
     remote_rows: list[dict[str, Any]] = []
     by_tmdb: dict[int, dict[str, Any]] = {}
@@ -333,7 +451,7 @@ def merge_poster_results(
             "sources": [movie.source],
             "movie_id": movie.id,
             "tmdb_id": tmdb_id,
-            "include_in_rotation": movie.include_in_rotation,
+            "collection_ids": memberships.get(movie.id, []),
         }
         local_rows.append(row)
         remember(row)
@@ -352,7 +470,7 @@ def merge_poster_results(
             "sources": [Movie.Source.TMDB],
             "movie_id": None,
             "tmdb_id": tmdb_id,
-            "include_in_rotation": False,
+            "collection_ids": [],
         }
         remote_rows.append(row)
         remember(row)
@@ -372,6 +490,7 @@ def search_posters(query: str) -> PosterSearch:
         condition |= Q(normalized_title__contains=normalized)
     local = list(
         Movie.objects.select_related("poster")
+        .prefetch_related("collection_entries")
         .filter(condition)
         .order_by("title", "year", "id")[:LOCAL_SEARCH_LIMIT]
     )
@@ -381,4 +500,7 @@ def search_posters(query: str) -> PosterSearch:
             remote = tmdb_search_cached(query)
         except DependencyUnavailableError:
             tmdb_status = "unavailable"
-    return PosterSearch(query=query, results=merge_poster_results(local, remote), tmdb=tmdb_status)
+    memberships = {movie.id: collection_ids(movie) for movie in local}
+    return PosterSearch(
+        query=query, results=merge_poster_results(local, remote, memberships), tmdb=tmdb_status
+    )

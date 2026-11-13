@@ -1,1 +1,1 @@
-"""Home Movie Poster application packages."""
+"""Frame application packages."""

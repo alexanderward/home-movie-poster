@@ -64,7 +64,7 @@ def run_manage(args: argparse.Namespace) -> int:
 
 
 def parser() -> argparse.ArgumentParser:
-    root = argparse.ArgumentParser(prog="poster")
+    root = argparse.ArgumentParser(prog="frame")
     commands = root.add_subparsers(dest="command", required=True)
 
     web = commands.add_parser("web", help="Run the Django ASGI application")

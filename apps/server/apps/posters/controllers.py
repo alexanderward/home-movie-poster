@@ -11,25 +11,30 @@ from ninja.files import UploadedFile
 from apps.server.apps.posters import selectors, services
 
 from .contracts import (
+    ActiveCollectionInput,
     ApplicationSettingsInput,
     ApplicationSettingsView,
+    CollectionDetail,
+    CollectionInput,
+    CollectionList,
+    CollectionUpdateInput,
     DiscoveredDeviceView,
+    DisplayOverrideInput,
+    DisplayOverrideView,
     DisplayState,
     HealthView,
     MovieDetail,
     MovieNightInput,
     MovieNightView,
     MoviePage,
-    MovieUpdate,
     PlayerSettingsInput,
     PosterSearch,
     SessionView,
-    SlideshowView,
 )
 from .health import health
-from .models import ApplicationSettings, DiscoveredDevice, Movie, MovieNight
+from .models import ApplicationSettings, Collection, DiscoveredDevice, MovieNight
 
-router = Router(tags=["home-movie-poster"])
+router = Router(tags=["frame"])
 
 
 def require_csrf(request: HttpRequest) -> None:
@@ -53,10 +58,18 @@ def display(request: HttpRequest, preview: str = ""):
     return selectors.display_state(slideshow_only=preview == "slideshow")
 
 
-@router.get("/slideshow", response=SlideshowView)
-def get_slideshow(request: HttpRequest, limit: int = 24):
+@router.get("/display/override", response=DisplayOverrideView)
+def get_display_override(request: HttpRequest):
     del request
-    return selectors.slideshow(limit=min(max(limit, 1), 1000))
+    return selectors.display_override()
+
+
+@router.put("/display/override", response=DisplayOverrideView)
+def put_display_override(request: HttpRequest, payload: DisplayOverrideInput):
+    """Force the TV to a movie night, a slideshow, or one poster; ``auto`` restores the order."""
+    require_csrf(request)
+    services.set_display_override(payload)
+    return selectors.display_override()
 
 
 @router.get("/movies", response=MoviePage)
@@ -64,58 +77,114 @@ def list_movies(
     request: HttpRequest,
     query: str = "",
     source: str = "",
-    rotation: str = "",
+    collection: int | None = None,
     page: int = 1,
     page_size: int = 30,
 ):
     del request
     page = max(page, 1)
     page_size = min(max(page_size, 1), 100)
-    rotation_filter = {"included": True, "excluded": False}.get(rotation)
     items, total = selectors.movies(
         query=query,
         source=source,
-        include_in_rotation=rotation_filter,
+        collection_id=collection,
         page=page,
         page_size=page_size,
     )
     return MoviePage(items=items, page=page, page_size=page_size, total=total)
 
 
-@router.get("/movies/{movie_id}", response=MovieDetail)
-def get_movie(request: HttpRequest, movie_id: int):
-    del request
-    return selectors.movie_detail(Movie.objects.select_related("poster").get(pk=movie_id))
-
-
+# Declared before /movies/{movie_id} so "manual" is not routed as a movie id.
 @router.post("/movies/manual", response={201: MovieDetail})
 def manual_movie(
     request: HttpRequest,
     title: Form[str],
     year: Form[int | None] = None,
+    collection_id: Form[int | None] = None,
     poster: File[UploadedFile] = None,  # type: ignore[assignment]
 ):
+    """Upload an image (a poster, artwork, a photo) and optionally add it to a collection."""
     require_csrf(request)
     if poster is None:
-        raise ValueError("Choose a poster image.")
-    movie = services.create_manual_movie(title, year, poster.read())
+        raise ValueError("Choose an image.")
+    movie = services.create_manual_movie(title, year, poster.read(), collection_id=collection_id)
     return Status(201, selectors.movie_detail(movie))
 
 
-@router.patch("/movies/{movie_id}", response=MovieDetail)
-def patch_movie(request: HttpRequest, movie_id: int, payload: MovieUpdate):
-    require_csrf(request)
-    movie = Movie.objects.select_related("poster").get(pk=movie_id)
-    return selectors.movie_detail(
-        services.update_movie(movie, include_in_rotation=payload.include_in_rotation)
-    )
+@router.get("/movies/{movie_id}", response=MovieDetail)
+def get_movie(request: HttpRequest, movie_id: int):
+    del request
+    return selectors.movie_detail(selectors.summaries().get(pk=movie_id))
 
 
 @router.post("/movies/{movie_id}/poster", response=MovieDetail)
 def replace_movie_poster(request: HttpRequest, movie_id: int, poster: File[UploadedFile]):
     require_csrf(request)
-    movie = Movie.objects.select_related("poster").get(pk=movie_id)
-    return selectors.movie_detail(services.update_movie(movie, poster_contents=poster.read()))
+    movie = selectors.summaries().get(pk=movie_id)
+    return selectors.movie_detail(services.replace_movie_poster(movie, poster.read()))
+
+
+@router.get("/collections", response=CollectionList)
+def list_collections(request: HttpRequest):
+    del request
+    return selectors.collections()
+
+
+@router.post("/collections", response={201: CollectionDetail})
+def create_collection(request: HttpRequest, payload: CollectionInput):
+    require_csrf(request)
+    return Status(201, selectors.collection_detail(services.create_collection(payload.name)))
+
+
+@router.put("/collections/active", response=CollectionList)
+def activate_collection(request: HttpRequest, payload: ActiveCollectionInput):
+    """Choose which collection the idle slideshow shows; ``null`` shows none."""
+    require_csrf(request)
+    services.set_active_collection(payload.collection_id)
+    return selectors.collections()
+
+
+@router.get("/collections/{collection_id}", response=CollectionDetail)
+def get_collection(request: HttpRequest, collection_id: int, limit: int = 24):
+    del request
+    return selectors.collection_detail(
+        Collection.objects.get(pk=collection_id), limit=min(max(limit, 1), 1000)
+    )
+
+
+@router.patch("/collections/{collection_id}", response=CollectionDetail)
+def update_collection(request: HttpRequest, collection_id: int, payload: CollectionUpdateInput):
+    require_csrf(request)
+    """Rename a collection or change its TV headline; omitted fields are left unchanged."""
+    return selectors.collection_detail(
+        services.update_collection(
+            collection_id,
+            name=payload.name,
+            tv_headline=payload.tv_headline,
+            show_headline=payload.show_headline,
+        )
+    )
+
+
+@router.delete("/collections/{collection_id}", response={204: None})
+def delete_collection(request: HttpRequest, collection_id: int):
+    require_csrf(request)
+    services.delete_collection(collection_id)
+    return Status(204, None)
+
+
+@router.put("/collections/{collection_id}/items/{movie_id}", response=MovieDetail)
+def add_collection_item(request: HttpRequest, collection_id: int, movie_id: int):
+    require_csrf(request)
+    services.add_to_collection(collection_id, movie_id)
+    return selectors.movie_detail(selectors.summaries().get(pk=movie_id))
+
+
+@router.delete("/collections/{collection_id}/items/{movie_id}", response={204: None})
+def remove_collection_item(request: HttpRequest, collection_id: int, movie_id: int):
+    require_csrf(request)
+    services.remove_from_collection(collection_id, movie_id)
+    return Status(204, None)
 
 
 @router.get("/movie-nights", response=list[MovieNightView])
@@ -123,7 +192,9 @@ def list_movie_nights(request: HttpRequest):
     del request
     return [
         selectors.movie_night(row)
-        for row in MovieNight.objects.select_related("movie__poster").order_by("event_date")
+        for row in MovieNight.objects.select_related("movie__poster")
+        .prefetch_related("movie__collection_entries")
+        .order_by("event_date")
     ]
 
 

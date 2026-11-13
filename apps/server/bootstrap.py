@@ -14,4 +14,4 @@ def manage(arguments: list[str]) -> None:
     from django.core.management import execute_from_command_line
 
     setup()
-    execute_from_command_line(["poster manage", *arguments])
+    execute_from_command_line(["frame manage", *arguments])

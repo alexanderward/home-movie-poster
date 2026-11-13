@@ -6,7 +6,7 @@ def test_title_normalization_ignores_punctuation_case_and_suffix():
     assert normalize_title("Wall-E") == "walle"
 
 
-def local(movie_id, title, year, source="manual", source_key=None, rotation=True):
+def local(movie_id, title, year, source="manual", source_key=None):
     from apps.server.apps.posters.models import Movie
 
     return Movie(
@@ -16,7 +16,6 @@ def local(movie_id, title, year, source="manual", source_key=None, rotation=True
         title=title,
         normalized_title=normalize_title(title),
         year=year,
-        include_in_rotation=rotation,
     )
 
 
@@ -51,8 +50,10 @@ def test_merge_collapses_manual_and_imported_copies():
 
 
 def test_merge_keeps_remakes_with_different_years_apart():
-    results = merge_poster_results([local(5, "Dune", 2021)], [tmdb(841, "Dune", 1984)])
-    assert [(row.key, row.include_in_rotation) for row in results] == [
-        ("movie:5", True),
-        ("tmdb:841", False),
+    results = merge_poster_results(
+        [local(5, "Dune", 2021)], [tmdb(841, "Dune", 1984)], {5: [1, 3]}
+    )
+    assert [(row.key, row.collection_ids) for row in results] == [
+        ("movie:5", [1, 3]),
+        ("tmdb:841", []),
     ]

@@ -1,6 +1,6 @@
 # Vision and scope
 
-Home Movie Poster turns a vertically mounted television into a calm, accurate cinema marquee. It follows a Strato player in real time, advertises the next family movie night while the player is idle, and otherwise rotates through a deliberately small slideshow.
+Frame turns a vertically mounted television into a calm household gallery and an accurate cinema marquee. It follows a Strato player in real time, advertises the next family movie night while the player is idle, and otherwise rotates through the collection chosen to be on the TV.
 
 ## Primary users
 
@@ -11,9 +11,9 @@ Home Movie Poster turns a vertically mounted television into a calm, accurate ci
 
 Playback always wins. Playing, paused, scan-forward, and scan-reverse states display `Now Playing`; a connection loss preserves that state for 30 seconds. The next unarchived movie night follows, then the no-repeat poster rotation, then setup guidance.
 
-Movie-night dates are local calendar values in the configured timezone. Events may use any date, with a next-Friday shortcut. Today is `Tonight`, a future Friday is `Coming Friday`, and other dates use `Coming <weekday>`.
+Movie-night dates are local calendar values in the configured timezone. Events may use any date, with a next-Friday shortcut. Today is `Tonight`, tomorrow is `Tomorrow Night`, dates later in the coming week use `Coming <weekday>`, and anything a week or more away is `Coming Soon` (a bare weekday would be ambiguous).
 
-Posters are never cropped. The TV layout reserves remaining space for the headline, title, showtime, pause state, and a slim playback progress bar.
+Posters are never cropped. The TV layout reserves remaining space for the headline, showtime, and a slim playback progress bar. It never repeats the title, which the poster already carries.
 
 ## Sources
 

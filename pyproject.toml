@@ -3,9 +3,9 @@ requires = ["hatchling==1.27.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "home-movie-poster"
+name = "home-frame"
 version = "0.1.0"
-description = "Self-hosted portrait movie poster display for Kaleidescape"
+description = "Self-hosted portrait display for artwork collections, movie nights, and Kaleidescape playback"
 readme = "README.md"
 requires-python = "==3.12.8"
 dependencies = [
@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [project.scripts]
-poster = "apps.cli.main:main"
+frame = "apps.cli.main:main"
 
 [dependency-groups]
 dev = [

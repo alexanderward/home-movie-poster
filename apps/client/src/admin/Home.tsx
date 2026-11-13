@@ -1,6 +1,8 @@
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { api, jsonBody } from '../api';
-import type { MovieDetail, MovieNightView, MovieSummary, PosterSearch, PosterSearchResult, SlideshowView } from '../contracts.generated';
+import type { CollectionDetail, CollectionList, CollectionSummary, DisplayOverrideInput, DisplayOverrideView, MovieDetail, MovieNightView, MovieSummary, PosterSearch, PosterSearchResult } from '../contracts.generated';
+import { type CollectionEdit, CollectionsSection } from './Collections';
+import { OnTvSection, type OverrideChoice } from './OnTv';
 import { PosterThumb, dateLabel, errorMessage, isoDate, nextFriday, type Notify, useDebounced } from './shared';
 
 const SOURCE_LABELS: Record<PosterSearchResult['sources'][number], string> = {
@@ -13,13 +15,6 @@ const TMDB_NOTES: Record<PosterSearch['tmdb'], string> = {
   disabled: 'TMDB search is not configured. Add TMDB_READ_TOKEN to .env; uploaded and previously selected posters remain available.',
   unavailable: 'TMDB is unreachable right now. Showing uploaded and previously selected posters only.',
 };
-
-function intervalLabel(seconds: number) {
-  if (seconds < 60) return `${seconds} seconds`;
-  const minutes = seconds / 60;
-  if (minutes === 1) return 'minute';
-  return Number.isInteger(minutes) ? `${minutes} minutes` : `${seconds} seconds`;
-}
 
 /** The first Friday from next Friday onward that has no movie night yet. */
 function nextFreeFriday(taken: Set<string>) {
@@ -46,10 +41,10 @@ function longDateLabel(value: string, showtime: string | null) {
 /** Adapts a scheduled night to the search-result shape the schedule sheet edits. */
 function nightResult(night: MovieNightView): PosterSearchResult {
   const { movie } = night;
-  return { key: `night-${night.id}`, title: movie.title, year: movie.year, poster_url: movie.poster_url, sources: [movie.source], movie_id: movie.id, tmdb_id: null, include_in_rotation: movie.include_in_rotation };
+  return { key: `night-${night.id}`, title: movie.title, year: movie.year, poster_url: movie.poster_url, sources: [movie.source], movie_id: movie.id, tmdb_id: null, collection_ids: movie.collection_ids };
 }
 
-/** Single admin view: what is scheduled, and one search to schedule or add posters. */
+/** Single admin view: what is scheduled, the collections the TV rotates through, and one search. */
 export function Home({ notify }: { notify: Notify }) {
   const [nights, setNights] = useState<MovieNightView[] | null>(null);
   const [confirmingId, setConfirmingId] = useState<number | null>(null);
@@ -59,8 +54,12 @@ export function Home({ notify }: { notify: Notify }) {
   const [loading, setLoading] = useState(false);
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [scheduling, setScheduling] = useState<{ result: PosterSearchResult; night?: MovieNightView } | null>(null);
-  const [slideshow, setSlideshow] = useState<SlideshowView | null>(null);
+  const [collections, setCollections] = useState<CollectionList | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [detail, setDetail] = useState<CollectionDetail | null>(null);
   const [showAll, setShowAll] = useState(false);
+  const [override, setOverride] = useState<DisplayOverrideView | null>(null);
+  const [overrideUnavailable, setOverrideUnavailable] = useState(false);
   const searchInput = useRef<HTMLInputElement>(null);
 
   const loadNights = useCallback(async () => {
@@ -68,13 +67,46 @@ export function Home({ notify }: { notify: Notify }) {
     catch (caught) { notify(errorMessage(caught, 'Could not load movie nights.'), 'error'); }
   }, [notify]);
 
-  const loadSlideshow = useCallback(async () => {
-    try { setSlideshow(await api<SlideshowView>(`/api/slideshow?limit=${showAll ? 1000 : 24}`)); }
-    catch (caught) { notify(errorMessage(caught, 'Could not load the slideshow.'), 'error'); }
-  }, [notify, showAll]);
+  /** Loads every collection, keeping the selection when it still exists, else the one on the TV. */
+  const loadCollections = useCallback(async (select?: number) => {
+    try {
+      const list = await api<CollectionList>('/api/collections');
+      setCollections(list);
+      setSelectedId((current) => {
+        const wanted = select ?? current;
+        if (wanted != null && list.items.some((row) => row.id === wanted)) return wanted;
+        return list.active_id ?? list.items[0]?.id ?? null;
+      });
+    } catch (caught) { notify(errorMessage(caught, 'Could not load collections.'), 'error'); }
+  }, [notify]);
+
+  const loadDetail = useCallback(async () => {
+    if (selectedId == null) { setDetail(null); return; }
+    try { setDetail(await api<CollectionDetail>(`/api/collections/${selectedId}?limit=${showAll ? 1000 : 24}`)); }
+    catch (caught) { notify(errorMessage(caught, 'Could not load the collection.'), 'error'); }
+  }, [notify, selectedId, showAll]);
+
+  const refreshCollections = useCallback(() => { void loadCollections(); void loadDetail(); }, [loadCollections, loadDetail]);
+
+  const loadOverride = useCallback(async () => {
+    try {
+      setOverride(await api<DisplayOverrideView>('/api/display/override'));
+      setOverrideUnavailable(false);
+    } catch {
+      // The next poll retries; the TV keeps running either way.
+      setOverrideUnavailable(true);
+    }
+  }, []);
 
   useEffect(() => { void loadNights(); }, [loadNights]);
-  useEffect(() => { void loadSlideshow(); }, [loadSlideshow]);
+  // Keeps "On the TV" current as playback starts and stops and slides change.
+  useEffect(() => {
+    void loadOverride();
+    const timer = window.setInterval(() => void loadOverride(), 5000);
+    return () => window.clearInterval(timer);
+  }, [loadOverride, nights, collections]);
+  useEffect(() => { void loadCollections(); }, [loadCollections]);
+  useEffect(() => { void loadDetail(); }, [loadDetail]);
 
   useEffect(() => {
     if (confirmingId == null) return;
@@ -105,50 +137,93 @@ export function Home({ notify }: { notify: Notify }) {
   }
 
   /** Returns the saved presentation id, snapshotting a TMDB result first when needed. */
-  async function ensureMovie(result: PosterSearchResult, includeInRotation: boolean) {
+  async function ensureMovie(result: PosterSearchResult) {
     if (result.movie_id != null) return result.movie_id;
     if (result.tmdb_id == null) throw new Error('This movie cannot be saved.');
     const movie = await api<MovieDetail>('/api/tmdb/import', { method: 'POST', body: jsonBody({ tmdb_id: result.tmdb_id }) });
-    if (movie.include_in_rotation !== includeInRotation) {
-      await api(`/api/movies/${movie.id}`, { method: 'PATCH', body: jsonBody({ include_in_rotation: includeInRotation }) });
-    }
-    patch(result.key, { movie_id: movie.id, include_in_rotation: includeInRotation, poster_url: movie.poster_url ?? result.poster_url });
+    patch(result.key, { movie_id: movie.id, collection_ids: movie.collection_ids, poster_url: movie.poster_url ?? result.poster_url });
     return movie.id;
   }
 
-  async function toggleSlideshow(result: PosterSearchResult) {
+  /** Adds a saved movie to, or removes it from, a collection, keeping search cards and the strip in sync. */
+  async function setMembership(movie: Pick<MovieSummary, 'id' | 'title'>, collection: Pick<CollectionSummary, 'id' | 'name'>, include: boolean) {
+    setSearch((current) => current && {
+      ...current,
+      results: current.results.map((row) => row.movie_id !== movie.id ? row : {
+        ...row,
+        collection_ids: include ? [...new Set([...row.collection_ids, collection.id])] : row.collection_ids.filter((id) => id !== collection.id),
+      }),
+    });
+    if (!include) setDetail((current) => current && current.id === collection.id ? { ...current, item_count: current.item_count - 1, items: current.items.filter((item) => item.id !== movie.id) } : current);
+    try {
+      await api(`/api/collections/${collection.id}/items/${movie.id}`, { method: include ? 'PUT' : 'DELETE' });
+      if (include) notify(`${movie.title} added to ${collection.name}.`);
+      else notify(`${movie.title} removed from ${collection.name}.`, 'success', { label: 'Undo', run: () => void setMembership(movie, collection, true) });
+    } catch (caught) {
+      notify(errorMessage(caught, 'Could not update the collection.'), 'error');
+    } finally {
+      refreshCollections();
+    }
+  }
+
+  async function toggleInCollection(result: PosterSearchResult, collection: CollectionSummary) {
     setBusy(result.key, true);
     try {
-      if (result.movie_id == null) {
-        await ensureMovie(result, true);
-        notify(`${result.title} added to the slideshow.`);
-      } else {
-        const include = !result.include_in_rotation;
-        await api(`/api/movies/${result.movie_id}`, { method: 'PATCH', body: jsonBody({ include_in_rotation: include }) });
-        patch(result.key, { include_in_rotation: include });
-        if (include) notify(`${result.title} added to the slideshow.`);
-        else notify(`${result.title} removed from the slideshow.`, 'success', { label: 'Undo', run: () => void setInSlideshow({ id: result.movie_id!, title: result.title }, true) });
-      }
-      void loadSlideshow();
+      const movieId = await ensureMovie(result);
+      await setMembership({ id: movieId, title: result.title }, collection, !result.collection_ids.includes(collection.id));
     } catch (caught) {
-      notify(errorMessage(caught, 'Could not update the slideshow.'), 'error');
+      notify(errorMessage(caught, 'Could not update the collection.'), 'error');
     } finally {
       setBusy(result.key, false);
     }
   }
 
-  /** Sets a local movie's slideshow flag from anywhere on the page, keeping search cards in sync. */
-  async function setInSlideshow(movie: Pick<MovieSummary, 'id' | 'title'>, include: boolean) {
-    setSearch((current) => current && { ...current, results: current.results.map((row) => row.movie_id === movie.id ? { ...row, include_in_rotation: include } : row) });
-    if (!include) setSlideshow((current) => current && { ...current, total: current.total - 1, items: current.items.filter((item) => item.id !== movie.id) });
+  async function activate(id: number | null) {
     try {
-      await api(`/api/movies/${movie.id}`, { method: 'PATCH', body: jsonBody({ include_in_rotation: include }) });
-      if (include) notify(`${movie.title} is back in the slideshow.`);
-      else notify(`${movie.title} removed from the slideshow.`, 'success', { label: 'Undo', run: () => void setInSlideshow(movie, true) });
+      const list = await api<CollectionList>('/api/collections/active', { method: 'PUT', body: jsonBody({ collection_id: id }) });
+      setCollections(list);
+      const name = list.items.find((row) => row.id === id)?.name;
+      notify(name ? `${name} is now on the TV.` : 'No collection is on the TV.');
     } catch (caught) {
-      notify(errorMessage(caught, 'Could not update the slideshow.'), 'error');
-    } finally {
-      void loadSlideshow();
+      notify(errorMessage(caught, 'Could not change what the TV shows.'), 'error');
+    }
+  }
+
+  async function changeOverride(input: OverrideChoice) {
+    const payload: DisplayOverrideInput = { collection_id: null, movie_id: null, ...input };
+    try {
+      const next = await api<DisplayOverrideView>('/api/display/override', { method: 'PUT', body: jsonBody(payload) });
+      setOverride(next);
+      if (input.mode === 'auto') notify('The TV is back to automatic.');
+      else if (input.mode === 'poster') notify(`${next.movie?.title ?? 'That poster'} is pinned to the TV.`);
+      else notify(`The TV is showing the ${input.mode === 'movie_night' ? 'movie night' : 'slideshow'} until you switch back.`);
+    } catch (caught) {
+      notify(errorMessage(caught, 'Could not change what the TV shows.'), 'error');
+    }
+  }
+
+  async function createCollection(name: string) {
+    const created = await api<CollectionDetail>('/api/collections', { method: 'POST', body: jsonBody({ name }) });
+    setShowAll(false);
+    await loadCollections(created.id);
+    notify(created.active ? `${created.name} created and shown on the TV.` : `${created.name} created.`);
+  }
+
+  async function editCollection(collection: CollectionSummary, changes: CollectionEdit) {
+    await api(`/api/collections/${collection.id}`, { method: 'PATCH', body: jsonBody(changes) });
+    refreshCollections();
+    notify(changes.name !== collection.name ? `Renamed to ${changes.name}.` : `Saved ${changes.name}.`);
+  }
+
+  async function deleteCollection(collection: CollectionSummary) {
+    try {
+      await api(`/api/collections/${collection.id}`, { method: 'DELETE' });
+      setSearch((current) => current && { ...current, results: current.results.map((row) => ({ ...row, collection_ids: row.collection_ids.filter((id) => id !== collection.id) })) });
+      setSelectedId(null);
+      await loadCollections();
+      notify(`${collection.name} deleted. Its images stay saved for other collections.`);
+    } catch (caught) {
+      notify(errorMessage(caught, 'Could not delete the collection.'), 'error');
     }
   }
 
@@ -162,8 +237,8 @@ export function Home({ notify }: { notify: Notify }) {
       await api(`/api/movie-nights/${night.id}`, { method: 'PATCH', body: jsonBody({ movie_id: night.movie.id, event_date: eventDate, showtime }) });
       notify(`${result.title} moved to ${dateLabel(eventDate, showtime)}.`);
     } else {
-      // Scheduling snapshots the TMDB presentation, but only + adds it to the slideshow.
-      const movieId = await ensureMovie(result, false);
+      // Scheduling snapshots the TMDB presentation, but only + adds it to a collection.
+      const movieId = await ensureMovie(result);
       await api('/api/movie-nights', { method: 'POST', body: jsonBody({ movie_id: movieId, event_date: eventDate, showtime }) });
       notify(`${result.title} scheduled for ${dateLabel(eventDate, showtime)}.`);
     }
@@ -186,14 +261,17 @@ export function Home({ notify }: { notify: Notify }) {
   const nightByMovie = new Map(upcoming.map((night) => [night.movie.id, night]));
   const results = search?.results ?? [];
   const stale = loading || debouncedQuery !== query.trim();
+  const selected = collections?.items.find((row) => row.id === selectedId) ?? null;
 
   return (
     <div className="tab-body">
+      <OnTvSection override={override} unavailable={overrideUnavailable} collections={collections} hasMovieNight={upcoming.length > 0} onChange={changeOverride} />
+
       <section className="section">
-        <h1 className="section-title">Up next</h1>
+        <h2 className="section-title">Up next</h2>
         {nights == null && <p className="muted">Loading…</p>}
         {nights != null && upcoming.length === 0 && (
-          <p className="empty-state compact">Nothing scheduled, so the TV shows your slideshow. Search for a movie below to plan a movie night.</p>
+          <p className="empty-state compact">Nothing scheduled, so the TV shows your collection. Search for a movie below to plan a movie night.</p>
         )}
         {upcoming.length > 0 && (
           <div className="up-next">
@@ -242,43 +320,25 @@ export function Home({ notify }: { notify: Notify }) {
         )}
       </section>
 
-      <section className="section">
-        <div className="section-head">
-          <h2 className="section-title">Slideshow</h2>
-          {slideshow && slideshow.total > 0 && (
-            <a className="button quiet small" href="/display?preview=slideshow" target="_blank" rel="noreferrer">Preview <span aria-hidden="true">↗</span></a>
-          )}
-        </div>
-        {slideshow == null && <p className="muted">Loading…</p>}
-        {slideshow?.total === 0 && (
-          <p className="empty-state compact">No posters in the slideshow yet. <button type="button" className="inline-link" onClick={focusSearch}>Find a movie</button> and tap + on its poster.</p>
-        )}
-        {slideshow != null && slideshow.total > 0 && (
-          <>
-            <p className="hint">
-              Shown on the TV when nothing is playing and no movie night is scheduled. {slideshow.total} poster{slideshow.total === 1 ? '' : 's'}, a new one every {intervalLabel(slideshow.interval_seconds)}.
-              {upcoming.length > 0 && <> <strong className="hint-strong">On hold until after movie night.</strong></>}
-            </p>
-            <div className={`slideshow-strip ${showAll ? 'expanded' : ''}`} aria-label="Posters in the slideshow">
-              <button type="button" className="strip-item strip-tile" onClick={focusSearch}><span aria-hidden="true">+</span>Add</button>
-              {slideshow.items.map((movie) => (
-                <figure className="strip-item" key={movie.id} title={movie.title}>
-                  {movie.poster_url ? <img src={movie.poster_url} alt={movie.title} loading="lazy" /> : <span>{movie.title}</span>}
-                  <button type="button" className="strip-remove" aria-label={`Remove ${movie.title} from the slideshow`} onClick={() => void setInSlideshow(movie, false)}>
-                    <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 3l6 6M9 3l-6 6" /></svg>
-                  </button>
-                </figure>
-              ))}
-              {slideshow.total > slideshow.items.length && (
-                <button type="button" className="strip-item strip-tile" onClick={() => setShowAll(true)}><span>+{slideshow.total - slideshow.items.length}</span>Show all</button>
-              )}
-              {showAll && slideshow.total > 24 && (
-                <button type="button" className="strip-item strip-tile" onClick={() => setShowAll(false)}><span aria-hidden="true">−</span>Fewer</button>
-              )}
-            </div>
-          </>
-        )}
-      </section>
+      <CollectionsSection
+        notify={notify}
+        collections={collections}
+        selected={selected}
+        detail={detail}
+        showAll={showAll}
+        holding={upcoming.length > 0}
+        onSelect={(id) => { setSelectedId(id); setShowAll(false); }}
+        onShowAll={setShowAll}
+        onActivate={activate}
+        onCreate={createCollection}
+        onEdit={editCollection}
+        onDelete={deleteCollection}
+        onRemoveItem={(movie) => { if (selected) void setMembership(movie, selected, false); }}
+        pinnedId={override?.mode === 'poster' ? override.movie?.id ?? null : null}
+        onPin={(movie) => void changeOverride(override?.mode === 'poster' && override.movie?.id === movie.id ? { mode: 'auto' } : { mode: 'poster', movie_id: movie.id })}
+        onFindMovie={focusSearch}
+        onUploaded={refreshCollections}
+      />
 
       <section className="section">
         <h2 className="section-title">Find a movie</h2>
@@ -309,7 +369,7 @@ export function Home({ notify }: { notify: Notify }) {
           <div className={`poster-grid ${stale ? 'is-stale' : ''}`}>
             {results.map((result) => {
               const busy = pending.has(result.key);
-              const inSlideshow = result.movie_id != null && result.include_in_rotation;
+              const inCollection = selected != null && result.collection_ids.includes(selected.id);
               const night = result.movie_id != null ? nightByMovie.get(result.movie_id) : undefined;
               const meta = [result.year, result.sources.map((source) => SOURCE_LABELS[source]).join(' + ')].filter(Boolean).join(' · ');
               return (
@@ -317,18 +377,20 @@ export function Home({ notify }: { notify: Notify }) {
                   <div className="poster-card-art">
                     {result.poster_url ? <img src={result.poster_url} alt="" loading="lazy" /> : <span>{result.title}</span>}
                     {night && <span className="poster-badge">{dateLabel(night.event_date, night.showtime)}</span>}
-                    <button
-                      className={`slideshow-toggle ${inSlideshow ? 'on' : ''}`}
-                      aria-pressed={inSlideshow}
-                      aria-label={inSlideshow ? `Remove ${result.title} from the slideshow` : `Add ${result.title} to the slideshow`}
-                      title={inSlideshow ? 'In the slideshow. Tap to remove.' : 'Add to the slideshow'}
-                      disabled={busy}
-                      onClick={() => void toggleSlideshow(result)}
-                    >
-                      {busy ? <span className="spinner small" /> : inSlideshow
-                        ? <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7" /></svg>
-                        : <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" /></svg>}
-                    </button>
+                    {selected && (
+                      <button
+                        className={`slideshow-toggle ${inCollection ? 'on' : ''}`}
+                        aria-pressed={inCollection}
+                        aria-label={inCollection ? `Remove ${result.title} from ${selected.name}` : `Add ${result.title} to ${selected.name}`}
+                        title={inCollection ? `In ${selected.name}. Tap to remove.` : `Add to ${selected.name}`}
+                        disabled={busy}
+                        onClick={() => void toggleInCollection(result, selected)}
+                      >
+                        {busy ? <span className="spinner small" /> : inCollection
+                          ? <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7" /></svg>
+                          : <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" /></svg>}
+                      </button>
+                    )}
                   </div>
                   <div className="poster-card-body">
                     <strong title={result.title}>{result.title}</strong>
@@ -344,7 +406,6 @@ export function Home({ notify }: { notify: Notify }) {
           </div>
         )}
 
-        <UploadPoster notify={notify} onUploaded={() => void loadSlideshow()} />
         {search?.tmdb === 'ok' && <p className="credit">This product uses the TMDB API but is not endorsed or certified by TMDB.</p>}
       </section>
 
@@ -426,39 +487,5 @@ function ScheduleSheet({ result, night, defaultDate, onSubmit, onClose }: {
         </div>
       </form>
     </dialog>
-  );
-}
-
-function UploadPoster({ notify, onUploaded }: { notify: Notify; onUploaded: () => void }) {
-  const [busy, setBusy] = useState(false);
-
-  async function upload(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = event.currentTarget;
-    setBusy(true);
-    try {
-      await api('/api/movies/manual', { method: 'POST', body: new FormData(form) });
-      form.reset();
-      notify('Poster uploaded and added to the slideshow.');
-      onUploaded();
-    } catch (caught) {
-      notify(errorMessage(caught, 'Could not upload poster.'), 'error');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <details className="card upload-card">
-      <summary>Can’t find it? Upload your own poster</summary>
-      <form onSubmit={upload} className="form-stack">
-        <div className="field-row">
-          <label>Title<input name="title" required maxLength={300} autoComplete="off" /></label>
-          <label><span>Year <span className="optional">optional</span></span><input name="year" type="number" inputMode="numeric" min="1888" max="2200" /></label>
-        </div>
-        <label>Poster image<input name="poster" type="file" accept="image/jpeg,image/png,image/webp" required /></label>
-        <button className="button primary" disabled={busy}>{busy ? 'Uploading…' : 'Upload poster'}</button>
-      </form>
-    </details>
   );
 }

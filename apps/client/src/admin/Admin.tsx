@@ -36,7 +36,7 @@ export function Admin() {
     <main className="admin-shell">
       <header className="admin-header">
         <button type="button" className="admin-brand" onClick={() => setParams({}, { replace: true })}>
-          <span className="brand-mark">H</span><strong>Home Movie Poster</strong>
+          <span className="brand-mark">F</span><strong>Frame</strong>
         </button>
         <div className="header-actions">
           <span className={`live-pill ${playerReady ? 'ready' : ''}`} title={health ? `Monitor ${health.monitor ? 'running' : 'stopped'}` : undefined}>
@@ -67,7 +67,7 @@ export function Admin() {
 
       {showSettings ? (
         <>
-          <button type="button" className="back-link" onClick={() => setParams({}, { replace: true })}>← Back to movie night</button>
+          <button type="button" className="back-link" onClick={() => setParams({}, { replace: true })}>← Back</button>
           <SettingsTab notify={notify} />
         </>
       ) : <Home notify={notify} />}

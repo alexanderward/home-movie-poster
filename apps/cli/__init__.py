@@ -1,1 +1,1 @@
-"""Command-line entry points for Home Movie Poster."""
+"""Command-line entry points for Frame."""

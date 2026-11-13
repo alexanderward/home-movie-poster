@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import Field
+from pydantic import Field, StringConstraints
 
 from apps.common.contracts import ContractModel, RequiredName
 
 MovieSource = Literal["tmdb", "manual"]
-DisplayMode = Literal["now_playing", "scheduled", "rotation", "setup"]
+DisplayMode = Literal["now_playing", "scheduled", "rotation", "pinned", "setup"]
+DisplayOverrideMode = Literal["auto", "movie_night", "slideshow", "poster"]
 
 
 class MovieSummary(ContractModel):
@@ -18,7 +19,7 @@ class MovieSummary(ContractModel):
     title: str
     year: int | None
     poster_url: str | None
-    include_in_rotation: bool
+    collection_ids: list[int]
 
 
 class MovieDetail(MovieSummary):
@@ -30,10 +31,6 @@ class MoviePage(ContractModel):
     page: int
     page_size: int
     total: int
-
-
-class MovieUpdate(ContractModel):
-    include_in_rotation: bool | None = None
 
 
 class MovieNightInput(ContractModel):
@@ -118,7 +115,7 @@ class PosterSearchResult(ContractModel):
     sources: list[MovieSource]
     movie_id: int | None
     tmdb_id: int | None
-    include_in_rotation: bool
+    collection_ids: list[int]
 
 
 class PosterSearch(ContractModel):
@@ -127,9 +124,81 @@ class PosterSearch(ContractModel):
     tmdb: TmdbSearchStatus
 
 
-class SlideshowView(ContractModel):
-    """Posters the idle slideshow rotates through; ``items`` is the most recently changed few."""
+CollectionName = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)
+]
 
-    total: int
+
+class CollectionInput(ContractModel):
+    name: CollectionName
+
+
+TvHeadline = Annotated[str, StringConstraints(strip_whitespace=True, max_length=40)]
+
+
+class CollectionUpdateInput(ContractModel):
+    """Edit a collection; omitted fields stay as they are."""
+
+    name: CollectionName | None = None
+    tv_headline: TvHeadline | None = None
+    show_headline: bool | None = None
+
+
+class CollectionSummary(ContractModel):
+    """A named gallery; ``cover_url`` is its most recently added item's image.
+
+    ``tv_headline`` is what the TV's top band says during its slideshow (blank uses ``name``), and
+    ``show_headline`` false leaves that band empty.
+    """
+
+    id: int
+    name: str
+    tv_headline: str
+    show_headline: bool
+    item_count: int
+    cover_url: str | None
+    active: bool
+
+
+class CollectionList(ContractModel):
+    """Every collection, which one the idle slideshow shows, and how long each image stays."""
+
+    items: list[CollectionSummary]
+    active_id: int | None
     interval_seconds: int
+
+
+class CollectionDetail(CollectionSummary):
+    """One collection; ``items`` is its most recently added few (``item_count`` is the total)."""
+
     items: list[MovieSummary]
+
+
+class ActiveCollectionInput(ContractModel):
+    collection_id: int | None
+
+
+class DisplayOverrideInput(ContractModel):
+    """Force what the TV shows until switched back to ``auto``.
+
+    ``slideshow`` takes an optional ``collection_id`` (omitted uses the active collection) and
+    ``poster`` requires ``movie_id``. Other ids are ignored.
+    """
+
+    mode: DisplayOverrideMode
+    collection_id: int | None = None
+    movie_id: int | None = None
+
+
+class DisplayOverrideView(ContractModel):
+    """The configured override and what the TV is showing because of it right now.
+
+    ``forced`` is false when the forced source has nothing to show and the TV fell back to the
+    normal order.
+    """
+
+    mode: DisplayOverrideMode
+    collection_id: int | None
+    movie: MovieSummary | None
+    forced: bool
+    now: DisplayState

@@ -1,9 +1,9 @@
-# Home Movie Poster
+# Frame
 
 ## Product purpose
 
-Home Movie Poster gives a household a portrait cinema display that reacts to Kaleidescape playback,
-advertises the next movie night, and otherwise rotates through a deliberately selected slideshow.
+Frame gives a household a portrait display that reacts to Kaleidescape playback, advertises the
+next movie night, and otherwise rotates through one chosen gallery collection.
 
 ## Users and environment
 
@@ -16,6 +16,8 @@ advertises the next movie night, and otherwise rotates through a deliberately se
 - Playback and pause always override scheduled and rotating posters.
 - The app discovers players and retains the selection by serial number rather than fixed IP address.
 - Posters remain uncropped. Status and showtime occupy the extra portrait space.
-- TMDB is the searchable movie catalog; only scheduled and slideshow selections are saved locally.
+- Collections are named galleries of movie posters, uploaded artwork, and photos. An item may
+  belong to several collections. Exactly one collection, or none, is on the TV at a time.
+- TMDB is the searchable movie catalog; only scheduled movies and collection items are saved locally.
 - Kaleidescape is read-only and supplies live playback state, progress, and current cover art only.
 - The admin page is intentionally unauthenticated and must remain on a trusted LAN.

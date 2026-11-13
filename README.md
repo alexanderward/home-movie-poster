@@ -1,8 +1,9 @@
-# Home Movie Poster
+# Frame
 
-Home Movie Poster turns a portrait-mounted television into a live cinema display. It discovers a
-Kaleidescape system on the local network, shows active playback and progress, schedules movie
-nights, and rotates through a small set of selected posters while the player is idle.
+Frame turns a portrait-mounted television into a household gallery and live cinema display. It
+rotates through gallery collections (movie posters, uploaded artwork, family photos) while idle,
+advertises scheduled movie nights, and takes over with live playback and progress when it discovers
+a Kaleidescape system playing on the local network.
 
 The application is a Django/Django Ninja API with a React/Vite client. SQLite stores presentation
 settings and selections, TMDB supplies search metadata, and a dedicated read-only monitor follows

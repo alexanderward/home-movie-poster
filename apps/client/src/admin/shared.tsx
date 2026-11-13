@@ -36,6 +36,6 @@ export function dateLabel(value: string, showtime: string | null) {
   return `${label} · ${time}`;
 }
 
-export function PosterThumb({ url, fallback = 'MP' }: { url: string | null; fallback?: string }) {
+export function PosterThumb({ url, fallback = 'F' }: { url: string | null; fallback?: string }) {
   return <div className="poster-thumb">{url ? <img src={url} alt="" loading="lazy" /> : <span>{fallback}</span>}</div>;
 }

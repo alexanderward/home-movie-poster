@@ -22,7 +22,7 @@ React bundle  SQLite + selected poster files
 - Django 5.2 and Django Ninja provide same-origin HTTP APIs and serve the built React bundle.
 - Pydantic models own public contracts; `make client-contracts` generates TypeScript.
 - The display polls its small state endpoint once per second. No WebSocket broker is required.
-- SQLite in WAL mode stores settings, saved TMDB/manual presentations, schedules, slideshow flags,
+- SQLite in WAL mode stores settings, saved TMDB/manual presentations, schedules, collections,
   discovery state, one monitor heartbeat, and one playback snapshot.
 - Selected TMDB and uploaded posters are normalized into a local media directory. Strato live art
   uses one replaceable runtime file and is never added to the saved catalog.
@@ -31,14 +31,22 @@ React bundle  SQLite + selected poster files
 ## Display resolution
 
 `selectors.display_state()` is the single priority resolver. It chooses active playback observed
-within the 30-second grace window, then the nearest future movie night, then an eligible shuffled
-poster, then setup state. HTTP polling serializes that Pydantic model.
+within the 30-second grace window, then the nearest future movie night, then a shuffled image
+from the active collection, then setup state. HTTP polling serializes that Pydantic model.
 
 ## Search and saved presentation state
 
 TMDB is the searchable catalog. Search results remain remote until a user schedules a movie or adds
-it to the slideshow. At that point the server saves only the TMDB identifier, title, year, slideshow
-flag, and a normalized poster. Manual uploads use the same compact presentation model.
+it to a collection. At that point the server saves only the TMDB identifier, title, year, and a
+normalized poster. Uploaded artwork and photos use the same compact presentation model (the internal
+`Movie` model), with the year optional.
+
+## Collections
+
+`Collection` is a named gallery; `CollectionItem` joins it to saved items many-to-many, so one upload
+can appear in several collections. `ApplicationSettings.active_collection` names the one collection
+the idle slideshow rotates through; deleting it leaves no collection on the TV. Deleting a collection
+removes its memberships, never the items. See [decision 0002](decisions/0002-collections-and-rename.md).
 
 The application never enumerates or mirrors the Kaleidescape library. A live title may reuse a
 previously selected poster by normalized title and year when Strato does not provide current art.

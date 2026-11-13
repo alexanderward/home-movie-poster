@@ -11,7 +11,7 @@ def client(request: HttpRequest) -> HttpResponseBase:
     if index.exists():
         return HttpResponse(index.read_bytes(), content_type="text/html")
     return HttpResponse(
-        "Home Movie Poster client is not built. Run make client or make client-build.",
+        "Frame client is not built. Run make client or make client-build.",
         content_type="text/plain",
         status=503,
     )

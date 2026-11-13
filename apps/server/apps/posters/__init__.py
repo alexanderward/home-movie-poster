@@ -1,1 +1,1 @@
-"""Movie poster domain."""
+"""Presentation domain: posters, collections, movie nights, and playback."""

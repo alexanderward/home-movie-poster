@@ -160,7 +160,7 @@ export function SettingsTab({ notify }: { notify: Notify }) {
             ))}
           </fieldset>
         </SettingRow>
-        <SettingRow label="Poster interval" hint="Time each slideshow poster stays on screen." htmlFor="interval">
+        <SettingRow label="Slide interval" hint="Time each image in the collection on the TV stays on screen." htmlFor="interval">
           <div className="range-field">
             <input id="interval" type="range" min="10" max="300" step="5" value={display.slideshow_interval_seconds} onChange={(event) => setDisplay({ ...display, slideshow_interval_seconds: Number(event.target.value) })} />
             <output htmlFor="interval">{duration(display.slideshow_interval_seconds)}</output>
@@ -197,7 +197,7 @@ export function SettingsTab({ notify }: { notify: Notify }) {
           <input id="manual-host" value={player.manual_host} onChange={(event) => setPlayer({ ...player, manual_host: event.target.value })} placeholder="192.168.5.104" inputMode="decimal" autoCapitalize="off" autoCorrect="off" spellCheck={false} />
         </SettingRow>
       </Group>
-      <p className="settings-footnote">Read-only connection. Live playback takes over the TV from the schedule and slideshow. No Kaleidescape library data is imported.</p>
+      <p className="settings-footnote">Read-only connection. Live playback takes over the TV from the schedule and collections. No Kaleidescape library data is imported.</p>
 
       <Group title="Server">
         {addresses.map((entry) => (
@@ -225,7 +225,7 @@ export function SettingsTab({ notify }: { notify: Notify }) {
         </SettingRow>
       </Group>
       <p className="settings-footnote">Open the TV link in the TV's browser and the Phone link to manage movie nights. Use the address on the same network as the device; the Strato's network is usually the TV's.</p>
-      <p className="settings-footnote">TMDB supplies movie search and metadata. Only movies you schedule or add to the slideshow are saved locally.</p>
+      <p className="settings-footnote">TMDB supplies movie search and metadata. Only movies you schedule or add to a collection are saved locally.</p>
 
       <div className={`save-bar ${dirty ? 'visible' : ''}`} aria-hidden={!dirty}>
         <span>Unsaved changes</span>

@@ -117,7 +117,14 @@ def test_phone_admin_is_usable_at_390_by_844(preview_server):
         },
         "/api/devices": [],
         "/api/movie-nights": [],
-        "/api/slideshow": {"total": 0, "interval_seconds": 60, "items": []},
+        "/api/collections": {"items": [], "active_id": None, "interval_seconds": 60},
+        "/api/display/override": {
+            "mode": "auto",
+            "collection_id": None,
+            "movie": None,
+            "forced": False,
+            "now": display_state(0),
+        },
         "/api/health": {
             "status": "degraded",
             "database": True,
@@ -139,7 +146,11 @@ def test_phone_admin_is_usable_at_390_by_844(preview_server):
         page.route("**/api/**", handler)
         page.goto(f"{BASE}/admin")
         page.get_by_role("heading", name="Up next").wait_for()
+        page.get_by_role("heading", name="On the TV").wait_for()
+        assert page.get_by_role("radio", name="Automatic").is_checked()
+        assert page.get_by_role("radio", name="Movie night").is_disabled()
         assert page.get_by_role("searchbox", name="Search TMDB").is_visible()
+        assert page.get_by_role("button", name="Create your first collection").is_visible()
         assert page.get_by_text("Private by design.", exact=False).count() == 0
         assert page.locator("body").evaluate("node => node.scrollWidth <= window.innerWidth")
         page.get_by_role("button", name="Settings").click()
@@ -148,6 +159,6 @@ def test_phone_admin_is_usable_at_390_by_844(preview_server):
         assert page.get_by_text("127.0.0.1", exact=True).is_visible()
         assert page.get_by_text(f"{BASE}/admin", exact=True).is_visible()
         assert page.locator("body").evaluate("node => node.scrollWidth <= window.innerWidth")
-        page.get_by_role("button", name="Back to movie night").click()
+        page.get_by_role("button", name="Back").click()
         page.get_by_role("heading", name="Up next").wait_for()
         browser.close()

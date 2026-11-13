@@ -5,7 +5,7 @@ from ninja import NinjaAPI
 from apps.server.apps.posters.controllers import router
 from apps.server.apps.posters.services import ConflictError, DependencyUnavailableError
 
-api = NinjaAPI(title="Home Movie Poster", version="1.0.0")
+api = NinjaAPI(title="Frame", version="1.0.0")
 
 
 @api.exception_handler(PermissionDenied)

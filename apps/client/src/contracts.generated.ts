@@ -1,7 +1,7 @@
 /* Generated from Pydantic contracts. Do not hand-edit. */
 
 export interface DisplayState {
-  mode: "now_playing" | "scheduled" | "rotation" | "setup";
+  mode: "now_playing" | "scheduled" | "rotation" | "pinned" | "setup";
   headline: string;
   title: string;
   poster_url: string | null;
@@ -22,7 +22,7 @@ export interface MovieSummary {
   title: string;
   year: number | null;
   poster_url: string | null;
-  include_in_rotation: boolean;
+  collection_ids: Array<number>;
 }
 
 export interface MovieDetail {
@@ -32,7 +32,7 @@ export interface MovieDetail {
   title: string;
   year: number | null;
   poster_url: string | null;
-  include_in_rotation: boolean;
+  collection_ids: Array<number>;
 }
 
 export interface MoviePage {
@@ -40,10 +40,6 @@ export interface MoviePage {
   page: number;
   page_size: number;
   total: number;
-}
-
-export interface MovieUpdate {
-  include_in_rotation: boolean | null;
 }
 
 export interface MovieNightInput {
@@ -111,7 +107,7 @@ export interface PosterSearchResult {
   sources: Array<"tmdb" | "manual">;
   movie_id: number | null;
   tmdb_id: number | null;
-  include_in_rotation: boolean;
+  collection_ids: Array<number>;
 }
 
 export interface PosterSearch {
@@ -120,8 +116,51 @@ export interface PosterSearch {
   tmdb: "ok" | "disabled" | "unavailable";
 }
 
-export interface SlideshowView {
-  total: number;
+export interface CollectionInput {
+  name: string;
+}
+
+export interface CollectionSummary {
+  id: number;
+  name: string;
+  tv_headline: string;
+  show_headline: boolean;
+  item_count: number;
+  cover_url: string | null;
+  active: boolean;
+}
+
+export interface CollectionList {
+  items: Array<CollectionSummary>;
+  active_id: number | null;
   interval_seconds: number;
+}
+
+export interface CollectionDetail {
+  id: number;
+  name: string;
+  tv_headline: string;
+  show_headline: boolean;
+  item_count: number;
+  cover_url: string | null;
+  active: boolean;
   items: Array<MovieSummary>;
+}
+
+export interface ActiveCollectionInput {
+  collection_id: number | null;
+}
+
+export interface DisplayOverrideInput {
+  mode: "auto" | "movie_night" | "slideshow" | "poster";
+  collection_id: number | null;
+  movie_id: number | null;
+}
+
+export interface DisplayOverrideView {
+  mode: "auto" | "movie_night" | "slideshow" | "poster";
+  collection_id: number | null;
+  movie: MovieSummary | null;
+  forced: boolean;
+  now: DisplayState;
 }

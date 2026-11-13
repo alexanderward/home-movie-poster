@@ -15,7 +15,6 @@ MODELS = [
     contracts.MovieSummary,
     contracts.MovieDetail,
     contracts.MoviePage,
-    contracts.MovieUpdate,
     contracts.MovieNightInput,
     contracts.MovieNightView,
     contracts.DiscoveredDeviceView,
@@ -26,7 +25,13 @@ MODELS = [
     contracts.HealthView,
     contracts.PosterSearchResult,
     contracts.PosterSearch,
-    contracts.SlideshowView,
+    contracts.CollectionInput,
+    contracts.CollectionSummary,
+    contracts.CollectionList,
+    contracts.CollectionDetail,
+    contracts.ActiveCollectionInput,
+    contracts.DisplayOverrideInput,
+    contracts.DisplayOverrideView,
 ]
 
 

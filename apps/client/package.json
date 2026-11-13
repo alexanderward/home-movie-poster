@@ -1,5 +1,5 @@
 {
-  "name": "home-movie-poster-client",
+  "name": "home-frame-client",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -11,6 +11,8 @@
     "test": "node --experimental-strip-types --test ../../tests/client.test.cjs"
   },
   "dependencies": {
+    "@fontsource/bebas-neue": "^5.3.0",
+    "@fontsource/inter": "^5.3.0",
     "core-js": "3.47.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",

@@ -5,7 +5,7 @@ import pytest
 from django.test import Client
 from django.utils import timezone
 
-from apps.server.apps.posters.contracts import MovieNightInput
+from apps.server.apps.posters.contracts import DisplayOverrideInput, MovieNightInput
 from apps.server.apps.posters.models import (
     ApplicationSettings,
     DiscoveredDevice,
@@ -15,8 +15,14 @@ from apps.server.apps.posters.models import (
     PosterAsset,
 )
 from apps.server.apps.posters.monitor import PosterMonitor, ProbeResult
-from apps.server.apps.posters.selectors import display_state
-from apps.server.apps.posters.services import ConflictError, save_movie_night
+from apps.server.apps.posters.selectors import display_state, resolve_display
+from apps.server.apps.posters.services import (
+    ConflictError,
+    add_to_collection,
+    create_collection,
+    save_movie_night,
+    set_display_override,
+)
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -34,12 +40,20 @@ def movie(title="Feature", source_key="movie-1", poster=True):
     )
 
 
+def in_slideshow(*movies):
+    """Put movies in the active collection, which the idle slideshow rotates through."""
+    collection = create_collection("Slideshow")
+    for row in movies:
+        add_to_collection(collection.id, row.id)
+    return collection
+
+
 def test_display_priority_playback_schedule_rotation(monkeypatch):
     config = ApplicationSettings.load()
     config.slideshow_interval_seconds = 60
     config.save()
     scheduled = movie("Scheduled", "scheduled")
-    rotating = movie("Rotation", "rotation")
+    in_slideshow(movie("Rotation", "rotation"))
     MovieNight.objects.create(movie=scheduled, event_date=timezone.localdate() + timedelta(days=1))
     assert display_state().title == "Scheduled"
 
@@ -53,7 +67,14 @@ def test_display_priority_playback_schedule_rotation(monkeypatch):
     state = display_state()
     assert state.mode == "now_playing"
     assert state.playback_status == "paused"
-    assert rotating.include_in_rotation
+    assert state.headline == "Paused"
+    PlaybackSnapshot.objects.filter(pk=1).update(play_status="playing")
+    assert display_state().headline == "Now Playing"
+
+    PlaybackSnapshot.objects.all().delete()
+    MovieNight.objects.all().delete()
+    state = display_state()
+    assert (state.mode, state.headline, state.title) == ("rotation", "Slideshow", "Rotation")
 
 
 def test_stale_disconnected_playback_expires_to_schedule():
@@ -69,6 +90,16 @@ def test_stale_disconnected_playback_expires_to_schedule():
     state = display_state()
     assert state.mode == "scheduled"
     assert state.headline == "Tonight"
+
+
+@pytest.mark.parametrize(
+    ("days_away", "expected"),
+    [(0, "Tonight"), (1, "Tomorrow Night"), (6, None), (7, "Coming Soon"), (21, "Coming Soon")],
+)
+def test_scheduled_headline_names_a_weekday_only_within_the_week(days_away, expected):
+    event_date = timezone.localdate() + timedelta(days=days_away)
+    MovieNight.objects.create(movie=movie(), event_date=event_date)
+    assert display_state().headline == (expected or f"Coming {event_date.strftime('%A')}")
 
 
 def write_playback(monitor, status, title):
@@ -106,10 +137,8 @@ def test_other_title_stopping_reverts_to_scheduled_movie_night():
 
 def test_watching_tonights_movie_retires_it_to_the_slideshow():
     scheduled = movie("Tonight")
-    scheduled.include_in_rotation = False
-    scheduled.save(update_fields=["include_in_rotation"])
     MovieNight.objects.create(movie=scheduled, event_date=tonight())
-    movie("Rotation", "rotation")
+    in_slideshow(movie("Rotation", "rotation"))
     monitor = PosterMonitor()
     write_playback(monitor, "playing", "Tonight")
     assert display_state().title == "Tonight"
@@ -194,8 +223,7 @@ def test_mutations_require_same_origin_csrf_token():
 def test_slideshow_preview_ignores_scheduled_movie_night():
     scheduled = movie("Scheduled", "scheduled-preview")
     rotating = movie("Rotating", "rotating-preview")
-    scheduled.include_in_rotation = False
-    scheduled.save()
+    in_slideshow(rotating)
     save_movie_night(
         MovieNightInput(movie_id=scheduled.id, event_date=timezone.localdate() + timedelta(days=3))
     )
@@ -203,3 +231,83 @@ def test_slideshow_preview_ignores_scheduled_movie_night():
     preview = display_state(slideshow_only=True)
     assert preview.mode == "rotation"
     assert preview.title == rotating.title
+
+
+def test_forced_slideshow_beats_playback_and_movie_night():
+    scheduled = movie("Scheduled", "forced-scheduled")
+    in_slideshow(movie("Rotating", "forced-rotating"))
+    save_movie_night(
+        MovieNightInput(movie_id=scheduled.id, event_date=timezone.localdate() + timedelta(days=1))
+    )
+    PlaybackSnapshot.objects.create(
+        title="Playing", play_status="playing", connected=True, observed_at=timezone.now()
+    )
+    assert display_state().mode == "now_playing"
+
+    set_display_override(DisplayOverrideInput(mode="slideshow"))
+    resolved, forced = resolve_display()
+    assert (resolved.mode, resolved.title, forced) == ("rotation", "Rotating", True)
+
+    set_display_override(DisplayOverrideInput(mode="movie_night"))
+    assert (display_state().mode, display_state().title) == ("scheduled", "Scheduled")
+
+    set_display_override(DisplayOverrideInput(mode="auto"))
+    assert display_state().mode == "now_playing"
+
+
+def test_forced_slideshow_can_show_a_collection_that_is_not_active():
+    in_slideshow(movie("Default", "default-art"))
+    other = create_collection("Holidays")
+    add_to_collection(other.id, movie("Ornament", "ornament").id)
+    set_display_override(DisplayOverrideInput(mode="slideshow", collection_id=other.id))
+    state = display_state()
+    assert (state.title, state.headline) == ("Ornament", "Holidays")
+    assert ApplicationSettings.load().active_collection_id != other.id
+
+
+def test_pinned_poster_stays_until_switched_back():
+    pinned = movie("Pinned", "pinned")
+    in_slideshow(movie("Rotating", "pinned-rotating"))
+    set_display_override(DisplayOverrideInput(mode="poster", movie_id=pinned.id))
+    state = display_state()
+    assert (state.mode, state.title, state.headline) == ("pinned", "Pinned", "")
+    # The admin's slideshow preview tab ignores the override.
+    assert display_state(slideshow_only=True).title == "Rotating"
+    with pytest.raises(ValueError):
+        set_display_override(DisplayOverrideInput(mode="poster"))
+    with pytest.raises(ValueError):
+        set_display_override(
+            DisplayOverrideInput(mode="poster", movie_id=movie("Bare", "bare", poster=False).id)
+        )
+
+
+def test_forced_source_with_nothing_to_show_falls_back_to_automatic():
+    in_slideshow(movie("Rotating", "fallback-rotating"))
+    set_display_override(DisplayOverrideInput(mode="movie_night"))
+    state, forced = resolve_display()
+    assert (state.mode, forced) == ("rotation", False)
+
+    pinned = movie("Pinned", "fallback-pinned")
+    set_display_override(DisplayOverrideInput(mode="poster", movie_id=pinned.id))
+    pinned.delete()
+    state, forced = resolve_display()
+    assert (state.mode, forced) == ("rotation", False)
+
+
+def test_override_endpoint_reports_what_the_tv_shows():
+    client = Client(enforce_csrf_checks=True)
+    token = client.get("/api/session").json()["csrf_token"]
+    in_slideshow(movie("Rotating", "endpoint-rotating"))
+    pinned = movie("Pinned", "endpoint-pinned")
+    response = client.put(
+        "/api/display/override",
+        data=json.dumps({"mode": "poster", "movie_id": pinned.id}),
+        content_type="application/json",
+        headers={"X-CSRFToken": token},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert (body["mode"], body["forced"], body["movie"]["id"]) == ("poster", True, pinned.id)
+    assert body["now"]["mode"] == "pinned"
+    assert client.get("/api/display").json()["title"] == "Pinned"
+    assert client.get("/api/display/override").json()["mode"] == "poster"
