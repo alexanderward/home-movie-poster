@@ -139,7 +139,7 @@ function Playback({ progress, duration }: { progress: number; duration: number }
 }
 
 export function Display() {
-  const { state, error, connected, connect } = useDisplayStore();
+  const { state, receivedAt, error, connected, connect } = useDisplayStore();
   const [clock, tick] = useState(0);
   useEffect(() => connect(), [connect]);
   useEffect(() => startAutoReload(), []);
@@ -147,11 +147,11 @@ export function Display() {
     const timer = window.setInterval(() => tick((value) => value + 1), 1000);
     return () => window.clearInterval(timer);
   }, []);
-  const progress = state?.duration_seconds && state.position_seconds != null && state.observed_at
+  const progress = state?.duration_seconds && state.position_seconds != null
     ? calculateProgress(
       state.position_seconds,
       state.duration_seconds,
-      state.observed_at,
+      receivedAt,
       state.playback_status === 'playing',
       Date.now() + clock * 0,
     ) : 0;

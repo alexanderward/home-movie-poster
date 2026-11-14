@@ -77,6 +77,25 @@ def test_display_priority_playback_schedule_rotation(monkeypatch):
     assert (state.mode, state.headline, state.title) == ("rotation", "Slideshow", "Rotation")
 
 
+def test_playing_position_advances_on_the_server_clock():
+    PlaybackSnapshot.objects.create(
+        title="Playing",
+        normalized_title="playing",
+        play_status="playing",
+        connected=True,
+        position_seconds=600,
+        duration_seconds=7200,
+        observed_at=timezone.now() - timedelta(seconds=10),
+    )
+    assert 610 <= display_state().position_seconds <= 612
+
+    PlaybackSnapshot.objects.filter(pk=1).update(play_status="paused")
+    assert display_state().position_seconds == 600
+
+    PlaybackSnapshot.objects.filter(pk=1).update(play_status="playing", position_seconds=7195)
+    assert display_state().position_seconds == 7200
+
+
 def test_stale_disconnected_playback_expires_to_schedule():
     scheduled = movie("Tonight")
     MovieNight.objects.create(movie=scheduled, event_date=timezone.localdate())

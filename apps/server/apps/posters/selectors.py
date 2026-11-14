@@ -156,13 +156,19 @@ def _now_playing(config: ApplicationSettings, now: datetime) -> DisplayState | N
         return None
     if not (snapshot.connected or snapshot.observed_at >= now - timedelta(seconds=30)):
         return None
+    position = snapshot.position_seconds
+    if position is not None and snapshot.play_status == "playing":
+        # Advance to now on the server's clock: the TV's clock can't be trusted to match observed_at.
+        position += max(0, int((now - snapshot.observed_at).total_seconds()))
+        if snapshot.duration_seconds:
+            position = min(position, snapshot.duration_seconds)
     return DisplayState(
         mode="now_playing",
         headline="Paused" if snapshot.play_status == "paused" else "Now Playing",
         title=snapshot.title,
         poster_url=f"/media/{snapshot.poster_path}" if snapshot.poster_path else None,
         playback_status=snapshot.play_status,
-        position_seconds=snapshot.position_seconds,
+        position_seconds=position,
         duration_seconds=snapshot.duration_seconds,
         observed_at=snapshot.observed_at,
         rotation=config.rotation,

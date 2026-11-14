@@ -7,6 +7,8 @@ export const isSlideshowPreview = () => new URLSearchParams(window.location.sear
 
 interface DisplayStore {
   state: DisplayState | null;
+  /** When `state` arrived, on this client's clock. */
+  receivedAt: number;
   error: string;
   connected: boolean;
   refresh: () => Promise<void>;
@@ -15,12 +17,13 @@ interface DisplayStore {
 
 export const useDisplayStore = create<DisplayStore>((set, get) => ({
   state: null,
+  receivedAt: 0,
   error: '',
   connected: false,
   refresh: async () => {
     try {
       const state = await api<DisplayState>(isSlideshowPreview() ? '/api/display?preview=slideshow' : '/api/display');
-      set({ state, error: '', connected: true });
+      set({ state, receivedAt: Date.now(), error: '', connected: true });
     } catch (error) {
       set({ error: error instanceof Error ? error.message : 'Display unavailable', connected: false });
     }
